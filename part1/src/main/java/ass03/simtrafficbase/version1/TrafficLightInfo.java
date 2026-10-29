@@ -1,3 +1,3 @@
-package pcd.ass01.simtrafficbase.version1;
+package ass03.simtrafficbase.version1;
 
 public  record TrafficLightInfo(TrafficLight sem, Road road, double roadPos) {}

@@ -1,4 +1,4 @@
-package pcd.ass01.simtrafficexamples.version1;
+package ass03.simtrafficexamples.version1;
 
 import java.awt.Graphics;
 import java.awt.Graphics2D;
@@ -6,8 +6,8 @@ import java.util.List;
 import javax.swing.JFrame;
 import javax.swing.JPanel;
 
-import pcd.ass01.simseq.version1.*;
-import pcd.ass01.simtrafficbase.version1.*;
+import ass03.simseq.version1.*;
+import ass03.simtrafficbase.version1.*;
 
 import java.awt.*;
 import javax.swing.*;

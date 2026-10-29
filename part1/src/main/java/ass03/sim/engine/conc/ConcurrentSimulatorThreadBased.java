@@ -1,9 +1,9 @@
-package pcd.ass01.sim.engine.conc;
+package ass03.sim.engine.conc;
 
 import java.util.concurrent.Semaphore;
 
-import pcd.ass01.sim.engine.*;
-import pcd.common.Flag;
+import ass03.sim.engine.*;
+import common.Flag;
 
 public class ConcurrentSimulatorThreadBased extends AbstractSimulator
 {

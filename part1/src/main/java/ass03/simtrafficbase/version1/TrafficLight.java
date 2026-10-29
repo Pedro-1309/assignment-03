@@ -1,4 +1,4 @@
-package pcd.ass01.simtrafficbase.version1;
+package ass03.simtrafficbase.version1;
 
 /**
  * Class modeling the structure and behaviour of a traffic light

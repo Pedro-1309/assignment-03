@@ -1,11 +1,11 @@
-package pcd.ass01.sim.engine.conc;
+package ass03.sim.engine.conc;
 
 import java.util.List;
 import java.util.concurrent.CyclicBarrier;
 
-import pcd.ass01.sim.model.AbstractAgent;
-import pcd.common.Flag;
-import pcd.common.Trigger;
+import ass03.sim.model.AbstractAgent;
+import common.Flag;
+import common.Trigger;
 
 public class WorkerAgent extends Thread {
 	

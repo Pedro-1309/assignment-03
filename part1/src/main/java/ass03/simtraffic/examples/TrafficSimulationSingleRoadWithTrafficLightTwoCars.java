@@ -1,8 +1,8 @@
-package pcd.ass01.simtraffic.examples;
+package ass03.simtraffic.examples;
 
-import pcd.ass01.sim.engine.conc.*;
-import pcd.ass01.sim.model.AbstractSimulationModel;
-import pcd.ass01.simtraffic.model.*;
+import ass03.sim.engine.conc.*;
+import ass03.sim.model.AbstractSimulationModel;
+import ass03.simtraffic.model.*;
 
 /**
  * 

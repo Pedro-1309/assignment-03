@@ -1,11 +1,11 @@
-package pcd.ass01.simtrafficexamples.version0;
+package ass03.simtrafficexamples.version0;
 
 import java.util.List;
 
-import pcd.ass01.simseq.version0.AbstractAgent;
-import pcd.ass01.simseq.version0.AbstractEnvironment;
-import pcd.ass01.simseq.version0.SimulationListener;
-import pcd.ass01.simtrafficbase.version0.*;
+import ass03.simseq.version0.AbstractAgent;
+import ass03.simseq.version0.AbstractEnvironment;
+import ass03.simseq.version0.SimulationListener;
+import ass03.simtrafficbase.version0.*;
 
 /**
  * Simple class keeping track of some statistics about a traffic simulation

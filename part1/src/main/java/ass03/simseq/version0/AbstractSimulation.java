@@ -1,4 +1,4 @@
-package pcd.ass01.simseq.version0;
+package ass03.simseq.version0;
 
 import java.util.ArrayList;
 import java.util.List;

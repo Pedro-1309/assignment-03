@@ -1,7 +1,7 @@
-package pcd.ass01.simtrafficexamples.version1;
+package ass03.simtrafficexamples.version1;
 
-import pcd.ass01.simseq.version1.*;
-import pcd.ass01.simtrafficbase.version1.*;
+import ass03.simseq.version1.*;
+import ass03.simtrafficbase.version1.*;
 
 /**
  * 

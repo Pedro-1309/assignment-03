@@ -1,4 +1,4 @@
-package pcd.ass01.simtrafficexamples.version0;
+package ass03.simtrafficexamples.version0;
 
 import java.awt.Graphics;
 import java.awt.Graphics2D;
@@ -6,14 +6,14 @@ import java.util.List;
 import javax.swing.JFrame;
 import javax.swing.JPanel;
 
-import pcd.ass01.simseq.version0.AbstractAgent;
-import pcd.ass01.simseq.version0.AbstractEnvironment;
-import pcd.ass01.simseq.version0.SimulationListener;
-import pcd.ass01.simtrafficbase.version0.CarAgentInfo;
-import pcd.ass01.simtrafficbase.version0.Road;
-import pcd.ass01.simtrafficbase.version0.RoadsEnv;
-import pcd.ass01.simtrafficbase.version0.TrafficLight;
-import pcd.ass01.simtrafficbase.version0.V2d;
+import ass03.simseq.version0.AbstractAgent;
+import ass03.simseq.version0.AbstractEnvironment;
+import ass03.simseq.version0.SimulationListener;
+import ass03.simtrafficbase.version0.CarAgentInfo;
+import ass03.simtrafficbase.version0.Road;
+import ass03.simtrafficbase.version0.RoadsEnv;
+import ass03.simtrafficbase.version0.TrafficLight;
+import ass03.simtrafficbase.version0.V2d;
 
 import java.awt.*;
 import javax.swing.*;
