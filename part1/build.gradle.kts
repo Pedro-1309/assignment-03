@@ -1,10 +1,12 @@
 plugins {
+    id("scala")
     application
 }
 
 val akkaVersion = "2.8.5"
 
 dependencies {
+    implementation("org.scala-lang:scala3-library_3:3.3.3")
     implementation("com.typesafe.akka:akka-actor-typed_2.13:$akkaVersion")
 
     // Logger SLF4J for Akka
@@ -16,7 +18,7 @@ dependencies {
 }
 
 application {
-    mainClass = "org.example.App"
+    mainClass.set("ass03.Main")
 }
 
 tasks.test {
