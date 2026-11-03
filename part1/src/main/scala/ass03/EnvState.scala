@@ -5,8 +5,8 @@ case class CarInfo(id: String, position: Double, speed: Double)
 
 case class EnvState(
                      cars: Map[String, CarInfo] = Map.empty,
-                     streetLength: Double = 1000.0,
-                     deltaTime: Double = 0.1
+                     streetLength: Double = 1500.0,
+                     deltaTime: Double = 1.0
                    ) {
 
   // Computes the new environment state based on the decisions made by the cars

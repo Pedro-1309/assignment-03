@@ -49,21 +49,22 @@ object SimulationController {
               context.log.info(s"Tick $tick completed. Next...")
             }
 
-            if (tick >= 1000) {
-              context.log.info("Simulation ended (max ticks reached).")
-              Behaviors.stopped
-            } else {
-              val nextEnvState = envState.update(newDecisions)
-              val nextTick = tick + 1
+//            if (tick >= 10000) {
+//              context.log.info("Simulation ended (max ticks reached).")
+//              Behaviors.stopped
+//            } else {
+            val nextEnvState = envState.update(newDecisions)
+            val nextTick = tick + 1
 
-              view ! ViewActor.UpdateView(tick, nextEnvState)
+            view ! ViewActor.UpdateView(tick, nextEnvState)
 
-              // Timer asincrono di 50ms
-              timers.startSingleTimer(TriggerNextTick, 50.millis)
+            // Timer asincrono di 5
+            timers.startSingleTimer(TriggerNextTick, 40.millis)
+//              context.self ! TriggerNextTick
 
-              // Update the environment state
-              running(timers, view, nextTick, nextEnvState, 0, cars, Map.empty)
-            }
+            // Update the environment state
+            running(timers, view, nextTick, nextEnvState, 0, cars, Map.empty)
+//            }
           } else {
             // Waits all responses
             running(timers, view, tick, envState, newResponsesCount, cars, newDecisions)
