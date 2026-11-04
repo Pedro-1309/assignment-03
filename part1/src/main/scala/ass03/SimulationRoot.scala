@@ -19,9 +19,11 @@ object SimulationRoot {
 
     val controller = context.spawn(SimulationController(viewActor, initialEnv), "simulation-controller")
 
+    val semActor = context.spawn(TrafficLightActor("sem-1", 740.0, controller), "traffic-light-1")
+
     val carActors = Seq(
-      context.spawn(CarActor("car-1", maxSpeed = 8.0, acceleration = 0.1, deceleration = 0.2), "car-actor-1"),
-      context.spawn(CarActor("car-2", maxSpeed = 7.0, acceleration = 0.1, deceleration = 0.1), "car-actor-2")
+      context.spawn(CarActorExtended("car-1", maxSpeed = 6.0, acceleration = 0.1, deceleration = 0.3), "car-actor-1"),
+      context.spawn(CarActorExtended("car-2", maxSpeed = 5.0, acceleration = 0.1, deceleration = 0.3), "car-actor-2")
     )
 
     // Send the start message to the controller to begin the simulation loop

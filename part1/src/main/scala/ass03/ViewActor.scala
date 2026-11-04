@@ -2,6 +2,8 @@ package ass03
 
 import akka.actor.typed.Behavior
 import akka.actor.typed.scaladsl.Behaviors
+import ass03.simtrafficbase.version0.TrafficLight.TrafficLightState
+
 import javax.swing.SwingUtilities
 
 // Java classes
@@ -42,20 +44,34 @@ object ViewActor {
   
   private def translateToJavaEnv(scalaEnv: EnvState): RoadsEnv = {
     val javaEnv = new RoadsEnv()
-    
-    // 1. Ricrea la strada (es. una linea orizzontale lunga quanto la streetLength)
+
     val startP = new P2d(0, 300)
     val endP = new P2d(scalaEnv.streetLength, 300)
     val road = javaEnv.createRoad(startP, endP)
 
-    // 2. Mappa le auto
     scalaEnv.cars.values.foreach { carInfo =>
-      // Creiamo un agente dummy solo per soddisfare la firma di registerNewCar
-      // Poiché la view legge solo la posizione e l'id, la logica dell'agente qui è ininfluente
+      // Dummy agent
       val dummyAgent = new CarAgentBasic(carInfo.id, javaEnv, road, carInfo.position, 0.0, 0.0, 0.0)
 
       javaEnv.registerNewCar(dummyAgent, road, carInfo.position)
     }
+
+    scalaEnv.trafficLights.values.foreach { semInfo =>
+      val javaState = semInfo.state match {
+        case "GREEN" => TrafficLightState.GREEN
+        case "YELLOW" => TrafficLightState.YELLOW
+        case "RED" => TrafficLightState.RED
+        case _ => TrafficLightState.RED
+      }
+
+      val pos = new P2d(semInfo.position, 300)
+      // Dummy traffic light
+      val tl = javaEnv.createTrafficLight(pos, javaState, 1, 1, 1)
+      road.addTrafficLight(tl, semInfo.position) //non è detto che serva
+    }
+
+    //Initialize environment (and traffic lights' states)
+    javaEnv.init()
     
     javaEnv
   }

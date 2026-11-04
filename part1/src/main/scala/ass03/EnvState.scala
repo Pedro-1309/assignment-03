@@ -2,9 +2,11 @@ package ass03
 
 
 case class CarInfo(id: String, position: Double, speed: Double)
+case class SemInfo(id: String, position: Double, state: String)
 
 case class EnvState(
                      cars: Map[String, CarInfo] = Map.empty,
+                     trafficLights: Map[String, SemInfo] = Map.empty,
                      streetLength: Double = 1500.0,
                      deltaTime: Double = 1.0
                    ) {

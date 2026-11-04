@@ -8,9 +8,11 @@ object SimulationController {
 
   sealed trait ControllerCommand
 
-  case class StartSimulation(cars: Seq[ActorRef[CarActor.CarCommand]]) extends ControllerCommand
+  case class StartSimulation(cars: Seq[ActorRef[CarActorExtended.CarCommand]]) extends ControllerCommand
 
   case class ActionDecided(carId: String, newSpeed: Double) extends ControllerCommand
+
+  case class TrafficLightUpdated(info: SemInfo) extends ControllerCommand
 
   private case object TriggerNextTick extends ControllerCommand
 
@@ -27,7 +29,7 @@ object SimulationController {
                        tick: Int,
                        envState: EnvState,
                        responsesCount: Int,
-                       cars: Seq[ActorRef[CarActor.CarCommand]],
+                       cars: Seq[ActorRef[CarActorExtended.CarCommand]],
                        decisions: Map[String, Double]
                      ): Behavior[ControllerCommand] =
     Behaviors.receive { (context, message) =>
@@ -35,7 +37,7 @@ object SimulationController {
 
         case StartSimulation(carRefs) =>
           context.log.info("Simulation started.")
-          carRefs.foreach(_ ! CarActor.DoStep(tick, envState, context.self))
+          carRefs.foreach(_ ! CarActorExtended.DoStep(tick, envState, context.self))
           running(timers, view, tick, envState, 0, carRefs, Map.empty)
 
         case ActionDecided(carId, speed) =>
@@ -49,29 +51,26 @@ object SimulationController {
               context.log.info(s"Tick $tick completed. Next...")
             }
 
-//            if (tick >= 10000) {
-//              context.log.info("Simulation ended (max ticks reached).")
-//              Behaviors.stopped
-//            } else {
             val nextEnvState = envState.update(newDecisions)
             val nextTick = tick + 1
 
             view ! ViewActor.UpdateView(tick, nextEnvState)
-
-            // Timer asincrono di 5
             timers.startSingleTimer(TriggerNextTick, 40.millis)
-//              context.self ! TriggerNextTick
 
             // Update the environment state
             running(timers, view, nextTick, nextEnvState, 0, cars, Map.empty)
-//            }
           } else {
             // Waits all responses
             running(timers, view, tick, envState, newResponsesCount, cars, newDecisions)
           }
 
+        case TrafficLightUpdated(semInfo) =>
+          val updatedSemaphores = envState.trafficLights + (semInfo.id -> semInfo)
+          val updatedEnv = envState.copy(trafficLights = updatedSemaphores)
+          running(timers, view, tick, updatedEnv, responsesCount, cars, decisions)
+          
         case TriggerNextTick =>
-          cars.foreach(_ ! CarActor.DoStep(tick, envState, context.self))
+          cars.foreach(_ ! CarActorExtended.DoStep(tick, envState, context.self))
           Behaviors.same
       }
     }
