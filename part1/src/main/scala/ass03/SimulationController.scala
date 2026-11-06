@@ -3,12 +3,13 @@ package ass03
 import akka.actor.typed.{ActorRef, Behavior}
 import akka.actor.typed.scaladsl.{Behaviors, TimerScheduler}
 import scala.concurrent.duration._
+import ass03.CarProtocol.{CarCommand, DoStep}
 
 object SimulationController {
 
   sealed trait ControllerCommand
 
-  case class StartSimulation(cars: Seq[ActorRef[CarActorExtended.CarCommand]]) extends ControllerCommand
+  case class StartSimulation(cars: Seq[ActorRef[CarCommand]]) extends ControllerCommand
 
   case class ActionDecided(carId: String, newSpeed: Double) extends ControllerCommand
 
@@ -29,7 +30,7 @@ object SimulationController {
                        tick: Int,
                        envState: EnvState,
                        responsesCount: Int,
-                       cars: Seq[ActorRef[CarActorExtended.CarCommand]],
+                       cars: Seq[ActorRef[CarCommand]],
                        decisions: Map[String, Double]
                      ): Behavior[ControllerCommand] =
     Behaviors.receive { (context, message) =>
@@ -37,7 +38,7 @@ object SimulationController {
 
         case StartSimulation(carRefs) =>
           context.log.info("Simulation started.")
-          carRefs.foreach(_ ! CarActorExtended.DoStep(tick, envState, context.self))
+          carRefs.foreach(_ ! DoStep(tick, envState, context.self))
           running(timers, view, tick, envState, 0, carRefs, Map.empty)
 
         case ActionDecided(carId, speed) =>
@@ -70,7 +71,7 @@ object SimulationController {
           running(timers, view, tick, updatedEnv, responsesCount, cars, decisions)
           
         case TriggerNextTick =>
-          cars.foreach(_ ! CarActorExtended.DoStep(tick, envState, context.self))
+          cars.foreach(_ ! DoStep(tick, envState, context.self))
           Behaviors.same
       }
     }

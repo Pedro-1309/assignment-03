@@ -2,11 +2,9 @@ package ass03
 
 import akka.actor.typed.{ActorRef, Behavior}
 import akka.actor.typed.scaladsl.Behaviors
+import ass03.CarProtocol.{CarCommand, DoStep}
 
 object CarActorExtended {
-
-  sealed trait CarCommand
-  case class DoStep(tick: Int, envState: EnvState, replyTo: ActorRef[SimulationController.ControllerCommand]) extends CarCommand
 
   private val CarNearDistance: Double = 15.0
   private val CarFarEnoughDistance: Double = 20.0
