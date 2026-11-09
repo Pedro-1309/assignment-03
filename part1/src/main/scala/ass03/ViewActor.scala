@@ -45,29 +45,25 @@ object ViewActor {
   private def translateToJavaEnv(scalaEnv: EnvState): RoadsEnv = {
     val javaEnv = new RoadsEnv()
 
-    val startP = new P2d(0, 300)
-    val endP = new P2d(scalaEnv.streetLength, 300)
-    val road = javaEnv.createRoad(startP, endP)
-
-    scalaEnv.cars.values.foreach { carInfo =>
-      // Dummy agent
-      val dummyAgent = new CarAgentBasic(carInfo.id, javaEnv, road, carInfo.position, 0.0, 0.0, 0.0)
-
-      javaEnv.registerNewCar(dummyAgent, road, carInfo.position)
+    val javaRoads = scalaEnv.roads.map { case (rId, rInfo) =>
+      val r = javaEnv.createRoad(new P2d(rInfo.startX, rInfo.startY), new P2d(rInfo.endX, rInfo.endY))
+      rId -> r
     }
 
     scalaEnv.trafficLights.values.foreach { semInfo =>
       val javaState = semInfo.state match {
         case "GREEN" => TrafficLightState.GREEN
         case "YELLOW" => TrafficLightState.YELLOW
-        case "RED" => TrafficLightState.RED
         case _ => TrafficLightState.RED
       }
+      val tl = javaEnv.createTrafficLight(new P2d(semInfo.x, semInfo.y), javaState, 75, 25, 100)
+      javaRoads(semInfo.roadId).addTrafficLight(tl, semInfo.position)
+    }
 
-      val pos = new P2d(semInfo.position, 300)
-      // Dummy traffic light
-      val tl = javaEnv.createTrafficLight(pos, javaState, 1, 1, 1)
-      road.addTrafficLight(tl, semInfo.position) //non è detto che serva
+    scalaEnv.cars.values.foreach { carInfo =>
+      val road = javaRoads(carInfo.roadId)
+      val dummyAgent = new CarAgentBasic(carInfo.id, javaEnv, road, carInfo.position, 0.0, 0.0, 0.0)
+      javaEnv.registerNewCar(dummyAgent, road, carInfo.position)
     }
 
     //Initialize environment (and traffic lights' states)

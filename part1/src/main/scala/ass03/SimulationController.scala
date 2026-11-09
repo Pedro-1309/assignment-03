@@ -13,8 +13,6 @@ object SimulationController {
 
   case class ActionDecided(carId: String, newSpeed: Double) extends ControllerCommand
 
-  case class TrafficLightUpdated(info: SemInfo) extends ControllerCommand
-
   private case object TriggerNextTick extends ControllerCommand
 
   // Immutable state
@@ -52,7 +50,7 @@ object SimulationController {
               context.log.info(s"Tick $tick completed. Next...")
             }
 
-            val nextEnvState = envState.update(newDecisions)
+            val nextEnvState = envState.update(tick, newDecisions)
             val nextTick = tick + 1
 
             view ! ViewActor.UpdateView(tick, nextEnvState)
@@ -64,11 +62,6 @@ object SimulationController {
             // Waits all responses
             running(timers, view, tick, envState, newResponsesCount, cars, newDecisions)
           }
-
-        case TrafficLightUpdated(semInfo) =>
-          val updatedSemaphores = envState.trafficLights + (semInfo.id -> semInfo)
-          val updatedEnv = envState.copy(trafficLights = updatedSemaphores)
-          running(timers, view, tick, updatedEnv, responsesCount, cars, decisions)
           
         case TriggerNextTick =>
           cars.foreach(_ ! DoStep(tick, envState, context.self))

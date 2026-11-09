@@ -33,8 +33,9 @@ object CarActorExtended {
     message match {
       case DoStep(_, env, replyTo) =>
         val me = env.cars(id)
+        val brakingDist = (me.speed * me.speed) / (2 * dec)
 
-        if (isCarNear(me, env, CarNearDistance)) {
+        if (isCarNear(me, env, CarNearDistance + brakingDist)) {
           // ACCELERATING -> DECELERATING FOR A CAR
           val newSpeed = Math.max(me.speed - dec, 0.0)
           replyTo ! SimulationController.ActionDecided(id, newSpeed)
@@ -60,8 +61,9 @@ object CarActorExtended {
     message match {
       case DoStep(_, env, replyTo) =>
         val me = env.cars(id)
+        val brakingDist = (me.speed * me.speed) / (2 * dec)
 
-        if (isCarNear(me, env, CarNearDistance)) {
+        if (isCarNear(me, env, CarNearDistance + brakingDist)) {
           // MOVING CONSTANT SPEED -> DECELERATING FOR A CAR
           val newSpeed = Math.max(me.speed - dec, 0.0)
           replyTo ! SimulationController.ActionDecided(id, newSpeed)
@@ -82,12 +84,13 @@ object CarActorExtended {
     message match {
       case DoStep(_, env, replyTo) =>
         val me = env.cars(id)
+        val brakingDist = (me.speed * me.speed) / (2 * dec)
 
         if (me.speed <= 0.0) {
           // DECELERATING FOR A CAR -> STOPPED
           replyTo ! SimulationController.ActionDecided(id, 0.0)
           stopped(id, maxSpeed, acc, dec)
-        } else if (!isCarNear(me, env, CarFarEnoughDistance)) {
+        } else if (!isCarNear(me, env, CarFarEnoughDistance + brakingDist)) {
           // DECELERATING FOR A CAR -> WAIT A BIT
           replyTo ! SimulationController.ActionDecided(id, me.speed)
           waitABit(id, maxSpeed, acc, dec, 2)
@@ -120,7 +123,9 @@ object CarActorExtended {
       case DoStep(_, env, replyTo) =>
         val me = env.cars(id)
 
-        if (isSemNearGreen(me, env, SemNearDistance)) {
+        // if it's green OR if we are gone past it and it's not close
+        if (isSemNearGreen(me, env, SemNearDistance) ||
+          (!isSemNearGreen(me, env, SemNearDistance) && !isSemNearNotGreen(me, env, SemNearDistance))) {
           // DECELERATING FOR A NOT GREEN SEM -> ACCELERATING
           val newSpeed = Math.min(me.speed + acc, maxSpeed)
           replyTo ! SimulationController.ActionDecided(id, newSpeed)
@@ -154,28 +159,33 @@ object CarActorExtended {
     }
   }
 
-  private def isCarNear(me: CarInfo, env: EnvState, sensingDistance: Double): Boolean = {
+  private def isCarNear(me: CarInfo, env: EnvState, threshold: Double): Boolean = {
+    val roadLen = env.roads(me.roadId).length
     env.cars.values.exists { other =>
-      other.id != me.id &&
+      other.id != me.id && other.roadId == me.roadId &&
         // Handles also wrap-around (if the road loops)
-        ((other.position > me.position && other.position - me.position < sensingDistance) ||
-          (other.position < me.position && (env.streetLength - me.position + other.position) < sensingDistance))
+        ((other.position > me.position && other.position - me.position < threshold) ||
+          (other.position < me.position && (roadLen - me.position + other.position) < threshold))
     }
   }
 
-  private def isSemNearNotGreen(me: CarInfo, env: EnvState, sensingDistance: Double): Boolean = {
+  private def isSemNearNotGreen(me: CarInfo, env: EnvState, threshold: Double): Boolean = {
+    val roadLen = env.roads(me.roadId).length
     env.trafficLights.values.exists { sem =>
-      val dist = if (sem.position >= me.position) sem.position - me.position
-        else (env.streetLength - me.position + sem.position)
-      dist < sensingDistance && sem.state != "GREEN"
+      sem.roadId == me.roadId && sem.state != "GREEN" && {
+        val dist = if (sem.position >= me.position) sem.position - me.position else (roadLen - me.position + sem.position)
+        dist < threshold
+      }
     }
   }
 
-  private def isSemNearGreen(me: CarInfo, env: EnvState, sensingDistance: Double): Boolean = {
+  private def isSemNearGreen(me: CarInfo, env: EnvState, threshold: Double): Boolean = {
+    val roadLen = env.roads(me.roadId).length
     env.trafficLights.values.exists { sem =>
-      val dist = if (sem.position >= me.position) sem.position - me.position
-        else (env.streetLength - me.position + sem.position)
-      dist < sensingDistance && sem.state == "GREEN"
+      sem.roadId == me.roadId && sem.state == "GREEN" && {
+        val dist = if (sem.position >= me.position) sem.position - me.position else (roadLen - me.position + sem.position)
+        dist < threshold
+      }
     }
   }
 }

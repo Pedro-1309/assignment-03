@@ -116,12 +116,13 @@ object CarActor {
   }
 
   // Evaluates if there is a car directly in front within the sensing distance
-  private def isCarNear(me: CarInfo, env: EnvState, sensingDistance: Double): Boolean = {
+  private def isCarNear(me: CarInfo, env: EnvState, threshold: Double): Boolean = {
+    val roadLen = env.roads(me.roadId).length
     env.cars.values.exists { other =>
-      other.id != me.id &&
+      other.id != me.id && other.roadId == me.roadId &&
         // Handles also wrap-around (if the road loops)
-        ((other.position > me.position && other.position - me.position < sensingDistance) ||
-          (other.position < me.position && (env.streetLength - me.position + other.position) < sensingDistance))
+        ((other.position > me.position && other.position - me.position < threshold) ||
+          (other.position < me.position && (roadLen - me.position + other.position) < threshold))
     }
   }
 }

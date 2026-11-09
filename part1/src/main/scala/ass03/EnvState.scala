@@ -1,34 +1,49 @@
 package ass03
 
+case class RoadInfo(id: String, startX: Double, startY: Double, endX: Double, endY: Double, length: Double)
 
-case class CarInfo(id: String, position: Double, speed: Double)
-case class SemInfo(id: String, position: Double, state: String)
+case class CarInfo(id: String, roadId: String, position: Double, speed: Double)
+
+// tickOffset for starting traffic lights at different states
+case class SemInfo(id: String, roadId: String, position: Double, state: String, x: Double, y: Double, tickOffset: Int = 0) {
+  def updateColor(tick: Int): SemInfo = {
+    val greenDuration = 75
+    val yellowDuration = 25
+    val redDuration = 100
+    val cycle = greenDuration + yellowDuration + redDuration
+
+    val t = (tick + tickOffset) % cycle
+    val newState = if (t < greenDuration) "GREEN"
+    else if (t < greenDuration + yellowDuration) "YELLOW"
+    else "RED"
+
+    this.copy(state = newState)
+  }
+}
 
 case class EnvState(
+                     roads: Map[String, RoadInfo] = Map.empty,
                      cars: Map[String, CarInfo] = Map.empty,
                      trafficLights: Map[String, SemInfo] = Map.empty,
-                     streetLength: Double = 1500.0,
                      deltaTime: Double = 1.0
                    ) {
 
   // Computes the new environment state based on the decisions made by the cars
-  def update(decisions: Map[String, Double]): EnvState = {
+  def update(tick: Int, decisions: Map[String, Double]): EnvState = {
 
-    val updatedCars = cars.map { case (id, carInfo) =>
-      // Retrieve the new speed, default to current if missing
-      val newSpeed = decisions.getOrElse(id, carInfo.speed)
-      var newPosition = carInfo.position + (newSpeed * deltaTime)
-
-      // Wrap around the street
-      if (newPosition > streetLength) {
-        newPosition = newPosition - streetLength
-      }
-
-      // Return the updated CarInfo
-      id -> carInfo.copy(position = newPosition, speed = newSpeed)
+    val updatedSems = trafficLights.map { case (id, sem) =>
+      id -> sem.updateColor(tick)
     }
 
-    // New instance of EnvState with the updated map
-    this.copy(cars = updatedCars)
+    val updatedCars = cars.map { case (id, car) =>
+      val newSpeed = decisions.getOrElse(id, car.speed)
+      var newPos = car.position + newSpeed
+      val roadLength = roads(car.roadId).length
+      // Wrap around the street
+      if (newPos > roadLength) newPos = newPos - roadLength
+      id -> car.copy(position = newPos, speed = newSpeed)
+    }
+
+    this.copy(cars = updatedCars, trafficLights = updatedSems)
   }
 }
