@@ -14,28 +14,29 @@ object ViewActor {
 
   sealed trait ViewCommand
   case class UpdateView(tick: Int, envState: EnvState) extends ViewCommand
-  case object Show extends ViewCommand
+  case class Show(controller: akka.actor.typed.ActorRef[SimulationController.ControllerCommand]) extends ViewCommand
 
   def apply(): Behavior[ViewCommand] = Behaviors.setup { context =>
 
-    var view: Option[RoadSimView] = None
-
-    SwingUtilities.invokeLater(() => {
-      view = Some(new RoadSimView())
-    })
+    var view: RoadSimView = null
+    var controlFrame: SimulationControlFrame = null
 
     Behaviors.receiveMessage {
-      case Show =>
+      case Show(controller) =>
         SwingUtilities.invokeLater(() => {
-          view.foreach(_.display())
+          view = new RoadSimView()
+          view.display()
+
+          controlFrame = new SimulationControlFrame(controller)
+          controlFrame.setVisible(true)
         })
         Behaviors.same
 
       case UpdateView(tick, envState) =>
         SwingUtilities.invokeLater(() => {
-          view.foreach { v =>
+          if (view != null) {
             val javaEnv = translateToJavaEnv(envState)
-            v.notifyStepDone(tick, null, javaEnv)
+            view.notifyStepDone(tick, null, javaEnv)
           }
         })
         Behaviors.same

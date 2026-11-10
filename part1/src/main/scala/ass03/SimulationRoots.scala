@@ -14,16 +14,16 @@ object SimulationRoots {
     val initialEnv = EnvState(roads = Map("r1" -> r1), cars = initialCars)
 
     val viewActor = context.spawn(ViewActor(), "view-actor")
-    viewActor ! ViewActor.Show
-
-    val controller = context.spawn(SimulationController(viewActor, initialEnv), "controller")
-
+    
     val cars = Seq(
       context.spawn(CarActor("car-1", 8.0, 0.1, 0.2), "car-1"),
       context.spawn(CarActor("car-2", 7.0, 0.1, 0.1), "car-2")
     )
 
-    controller ! SimulationController.StartSimulation(cars)
+    val controller = context.spawn(SimulationController(viewActor, initialEnv, cars), "controller")
+    
+    viewActor ! ViewActor.Show(controller)
+
     // The root actor has no further messages to process
     Behaviors.empty
   }
@@ -37,15 +37,15 @@ object SimulationRoots {
     val initialEnv = EnvState(roads = Map("r1" -> r1), cars = initialCars)
 
     val viewActor = context.spawn(ViewActor(), "view-actor")
-    viewActor ! ViewActor.Show
-
-    val controller = context.spawn(SimulationController(viewActor, initialEnv), "controller")
 
     val cars = (0 until numCars).map { i =>
       context.spawn(CarActor(s"car-$i", maxSpeed = 7.0, acceleration = 1.0, deceleration = 0.3), s"car-$i")
     }
 
-    controller ! SimulationController.StartSimulation(cars)
+    val controller = context.spawn(SimulationController(viewActor, initialEnv, cars), "controller")
+    
+    viewActor ! ViewActor.Show(controller)
+    //controller ! SimulationController.StartSimulation(cars)
     Behaviors.empty
   }
 
@@ -62,17 +62,16 @@ object SimulationRoots {
     val initialEnv = EnvState(roads = Map("r1" -> r1), cars = initialCars, trafficLights = Map("sem-1" -> sem))
 
     val viewActor = context.spawn(ViewActor(), "view-actor")
-    viewActor ! ViewActor.Show
-
-    val controller = context.spawn(SimulationController(viewActor, initialEnv), "controller")
-
 
     val cars = Seq(
       context.spawn(CarActorExtended("car-1", 6.0, 0.1, 0.3), "car-1"),
       context.spawn(CarActorExtended("car-2", 5.0, 0.1, 0.3), "car-2")
     )
 
-    controller ! SimulationController.StartSimulation(cars)
+    val controller = context.spawn(SimulationController(viewActor, initialEnv, cars), "controller")
+    
+    viewActor ! ViewActor.Show(controller)
+    //controller ! SimulationController.StartSimulation(cars)
     Behaviors.empty
   }
 
@@ -98,8 +97,6 @@ object SimulationRoots {
     )
 
     val viewActor = context.spawn(ViewActor(), "view-actor")
-    viewActor ! ViewActor.Show
-    val controller = context.spawn(SimulationController(viewActor, initialEnv), "controller")
 
     val cars = Seq(
       context.spawn(CarActorExtended("car-1", 6.0, 0.1, 0.3), "car-1"),
@@ -108,7 +105,10 @@ object SimulationRoots {
       context.spawn(CarActorExtended("car-4", 4.0, 0.1, 0.1), "car-4")
     )
 
-    controller ! SimulationController.StartSimulation(cars)
+    val controller = context.spawn(SimulationController(viewActor, initialEnv, cars), "controller")
+    
+    viewActor ! ViewActor.Show(controller)
+    //controller ! SimulationController.StartSimulation(cars)
     Behaviors.empty
   }
 }
