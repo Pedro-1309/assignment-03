@@ -87,7 +87,6 @@ object CarActor {
         } else if (!near) {
           // DECELERATING -> WAIT A BIT (no near car detected)
           replyTo ! SimulationController.ActionDecided(id, me.speed)
-          // Pass the internal timer state (e.g., 5 ticks) via method parameters
           waitABit(id, 20, maxSpeed, acc, dec)
         } else {
           // Stay in DECELERATING
