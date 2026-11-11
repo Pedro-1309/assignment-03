@@ -9,9 +9,8 @@ object Main {
 //    val rootBehavior = SimulationRoots.SingleRoadWithTrafficLightTwoCars()
 //    val rootBehavior = SimulationRoots.SingleRoadSeveralCars(numCars = 30)
     val rootBehavior = SimulationRoots.WithCrossRoads()
+//    val rootBehavior = SimulationRoots.MassiveTest(numCars = 5000, steps = 100)
 
     val system = ActorSystem(rootBehavior, "traffic-simulation-system")
-
-    // Optional: add a hook to terminate the system gracefully if needed
   }
 }

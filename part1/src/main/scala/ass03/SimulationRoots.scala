@@ -45,7 +45,6 @@ object SimulationRoots {
     val controller = context.spawn(SimulationController(viewActor, initialEnv, cars), "controller")
     
     viewActor ! ViewActor.Show(controller)
-    //controller ! SimulationController.StartSimulation(cars)
     Behaviors.empty
   }
 
@@ -71,7 +70,6 @@ object SimulationRoots {
     val controller = context.spawn(SimulationController(viewActor, initialEnv, cars), "controller")
     
     viewActor ! ViewActor.Show(controller)
-    //controller ! SimulationController.StartSimulation(cars)
     Behaviors.empty
   }
 
@@ -108,7 +106,34 @@ object SimulationRoots {
     val controller = context.spawn(SimulationController(viewActor, initialEnv, cars), "controller")
     
     viewActor ! ViewActor.Show(controller)
-    //controller ! SimulationController.StartSimulation(cars)
     Behaviors.empty
+  }
+
+  def MassiveTest(numCars: Int, steps: Int): Behavior[Nothing] = Behaviors.setup[Nothing] { context =>
+    val r1 = RoadInfo("r1", 0.0, 300.0, 15000.0, 300.0, 15000.0)
+
+    val initialCars: Map[String, CarInfo] = (0 until numCars).map { i =>
+      val id = s"car-$i"
+      id -> CarInfo(id, "r1", i * 10.0, 0.0)
+    }.toMap
+
+    val initialEnv = EnvState(roads = Map("r1" -> r1), cars = initialCars)
+
+    val cars = (0 until numCars).map { i =>
+      context.spawn(CarActor(s"car-$i", 7.0, 1.0, 0.3), s"car-$i")
+    }
+
+    val controller = context.spawn(MassiveSimulationController(initialEnv, cars), "controller")
+    // Root Guardian observs the controller (to terminate the system when the simulation ends)
+    context.watch(controller)
+
+    println(s"[ SIMULATION ] Running the simulation: $numCars cars, for $steps steps ...")
+    controller ! SimulationController.StartSimulation(steps)
+
+    Behaviors.receiveSignal {
+      // Received when the controller executes Behaviors.stopped
+      case (ctx, akka.actor.typed.Terminated(`controller`)) =>
+        Behaviors.stopped
+    }
   }
 }

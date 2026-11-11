@@ -9,7 +9,6 @@ object SimulationController {
 
   sealed trait ControllerCommand
 
-  //case class StartSimulation(cars: Seq[ActorRef[CarCommand]]) extends ControllerCommand
   case class StartSimulation(steps: Int) extends ControllerCommand
   case object StopSimulation extends ControllerCommand
 
@@ -83,9 +82,4 @@ object SimulationController {
           Behaviors.same
       }
     }
-
-  private def updateEnvironment(currentEnv: EnvState): EnvState = {
-    // Calcolo delle nuove posizioni basato sulle velocità ricevute
-    currentEnv
-  }
 }
