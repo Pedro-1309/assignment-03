@@ -74,6 +74,12 @@ public class RabbitMQManager {
         publishMessage(message);
     }
 
+    public void publishCellDeselection(int row, int col) {
+        incrementLocalClock();
+        String message = String.format("DESELECT|%s|%d|%d|%s", playerId, row, col, serializeClock());
+        publishMessage(message);
+    }
+
     private void publishMessage(String message) {
         if (channel != null && channel.isOpen()) {
             try {
