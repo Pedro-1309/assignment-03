@@ -2,21 +2,17 @@ plugins {
     application
 }
 
-val akkaVersion = "2.8.5"
-
 dependencies {
-    implementation("com.typesafe.akka:akka-actor-typed_2.13:$akkaVersion")
-
-    // Logger SLF4J for Akka
+    // Client ufficiale AMQP RabbitMQ
+    implementation("com.rabbitmq:amqp-client:5.20.0")
+    // Serializzatore JSON per i messaggi
+    implementation("com.google.code.gson:gson:2.10.1")
+    // SLF4J / Logback
     implementation("ch.qos.logback:logback-classic:1.4.14")
-
-    // Test
-    testImplementation("com.typesafe.akka:akka-actor-testkit-typed_2.13:$akkaVersion")
-    testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
 }
 
 application {
-    mainClass = "org.example.App"
+    mainClass = "ass03.HelloWorld"
 }
 
 tasks.test {
