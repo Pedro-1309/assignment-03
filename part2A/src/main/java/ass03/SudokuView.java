@@ -7,20 +7,33 @@ import java.awt.event.KeyEvent;
 
 public class SudokuView extends JFrame {
 
-    private final JButton[][] cells = new JButton[9][9];
+    private static final int GRID_SIZE = 9;
+    private final JButton[][] cells = new JButton[GRID_SIZE][GRID_SIZE];
     private SudokuActionListener listener;
 
     // Interfaccia per delegare le azioni utente al Controller/NetworkManager
     public interface SudokuActionListener {
         void onCellSelected(int row, int col);
         void onNumberInserted(int row, int col, int value);
+        void onQuit();
     }
 
     public SudokuView(String localPlayerId) {
         setTitle("Cooperative Sudoku - Player: " + localPlayerId);
         setSize(600, 600);
-        setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        setLayout(new GridLayout(9, 9));
+        setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
+        setLayout(new GridLayout(GRID_SIZE, GRID_SIZE));
+
+        // Closing the window -> leaving the game and notify the controller
+        addWindowListener(new java.awt.event.WindowAdapter() {
+            @Override
+            public void windowClosing(java.awt.event.WindowEvent windowEvent) {
+                if (listener != null) {
+                    listener.onQuit();
+                }
+                System.exit(0);
+            }
+        });
 
         initializeGrid();
     }
@@ -30,8 +43,8 @@ public class SudokuView extends JFrame {
     }
 
     private void initializeGrid() {
-        for (int row = 0; row < 9; row++) {
-            for (int col = 0; col < 9; col++) {
+        for (int row = 0; row < GRID_SIZE; row++) {
+            for (int col = 0; col < GRID_SIZE; col++) {
                 JButton btn = new JButton("");
                 btn.setFont(new Font("Arial", Font.BOLD, 24));
                 btn.setBackground(Color.WHITE);

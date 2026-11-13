@@ -20,7 +20,7 @@ public class RabbitMQManager {
     private final String playerId;
     private String currentQueueName;
     private String currentGameExchange;
-    private Map<String, Integer> vectorClock = new HashMap<>();
+    private final Map<String, Integer> vectorClock = new HashMap<>();
 
     public interface MessageListener {
         void onMessageReceived(String message);
@@ -42,6 +42,16 @@ public class RabbitMQManager {
         factory.setHost(host);
         this.connection = factory.newConnection();
         this.channel = connection.createChannel();
+    }
+
+    public void disconnect() throws IOException, TimeoutException {
+        if (channel != null && channel.isOpen()) {
+            channel.close();
+        }
+        if (connection != null && connection.isOpen()) {
+            connection.close();
+        }
+        System.out.println(" [" + playerId + "] Disconnected from RabbitMQ.");
     }
 
     // --- GAME PHASE (Sudoku) ---
@@ -128,10 +138,10 @@ public class RabbitMQManager {
         publishToExchange(currentGameExchange, message);
     }
 
-    public void publishStateReply(String requesterId, String serializedBoard) {
+    public void publishStateReply(String requesterId, String serializedBoard, String activePlayersStr) {
         incrementLocalClock();
-        String message = String.format("STATE_REPLY|%s|%s|%s|%s",
-                playerId, requesterId, serializedBoard, serializeClock());
+        String message = String.format("STATE_REPLY|%s|%s|%s|%s|%s",
+                playerId, requesterId, serializedBoard, activePlayersStr, serializeClock());
         publishToExchange(currentGameExchange, message);
     }
 

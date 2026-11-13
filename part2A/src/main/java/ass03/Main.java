@@ -9,15 +9,15 @@ public class Main {
     private static final AtomicInteger localSelectedRow = new AtomicInteger(-1);
     private static final AtomicInteger localSelectedCol = new AtomicInteger(-1);
 
-    private static List<String> activePlayersList = new ArrayList<>();
+    private static final List<String> activePlayersList = new ArrayList<>();
     private static final String myCurrentGameId = "Match-" + (int)(Math.random() * 100);
     private static String targetGameId = null;
 
     public static void main(String[] args) {
-        String localPlayerId = "Player-" + (int)(Math.random() * 1000);
+        String localPlayerId = "Player-" + (int) (Math.random() * 1000);
         activePlayersList.add(localPlayerId);
 
-        SudokuView view = new SudokuView(localPlayerId);
+        LobbyView lobbyView = new LobbyView();
         RabbitMQManager networkManager = new RabbitMQManager(localPlayerId);
         SudokuBoard board = new SudokuBoard();
 
@@ -35,21 +35,42 @@ public class Main {
 
                 @Override
                 public void onGameInfoReceived(String gameId, int playersCount) {
-                    if (targetGameId == null) {
-                        targetGameId = gameId;
-                        System.out.println("Active game found: " + gameId + " with " + playersCount + " players.");
-                    }
+                    lobbyView.addAvailableGame(gameId, playersCount);
+//                    if (targetGameId == null) {
+//                        targetGameId = gameId;
+//                        System.out.println("Active game found: " + gameId + " with " + playersCount + " players.");
+//                    }
                 }
             });
 
             networkManager.requestActiveGames();
-            Thread.sleep(2000);
 
-            if (targetGameId == null) {
-                targetGameId = myCurrentGameId;
-                System.out.println("No game found. Creating a new one: " + targetGameId);
-            }
+            lobbyView.setListener(new LobbyView.LobbyActionListener() {
+                @Override
+                public void onJoinGame(String gameId) {
+                    targetGameId = gameId;
+                    lobbyView.hideView();
+                    startGame(targetGameId, localPlayerId, networkManager, board);
+                }
 
+                @Override
+                public void onCreateNewGame() {
+                    targetGameId = myCurrentGameId;
+                    networkManager.publishGameInfo(targetGameId, 1);
+                    lobbyView.hideView();
+                    startGame(targetGameId, localPlayerId, networkManager, board);
+                }
+            });
+
+            lobbyView.display();
+        } catch (Exception e) {
+            System.err.println("Failed to connect to RabbitMQ. Make sure the broker is running.");
+        }
+    }
+
+    private static void startGame(String targetGameId, String localPlayerId, RabbitMQManager networkManager, SudokuBoard board) {
+        SudokuView view = new SudokuView(localPlayerId);
+        try {
             view.setListener(new SudokuView.SudokuActionListener() {
                 @Override
                 public void onCellSelected(int row, int col) {
@@ -79,97 +100,127 @@ public class Main {
                         System.out.println("You must select a cell to insert a value.");
                     }
                 }
+
+                @Override
+                public void onQuit() {
+                    int currentRow = localSelectedRow.get();
+                    int currentCol = localSelectedCol.get();
+
+                    if (currentRow != -1 && currentCol != -1) {
+                        networkManager.publishCellDeselection(currentRow, currentCol);
+                    }
+
+                    try {
+                        networkManager.disconnect();
+                    } catch (Exception ex) {
+                        ex.printStackTrace();
+                    }
+                }
             });
 
             networkManager.joinGame(targetGameId, message -> {
-                        String[] parts = message.split("\\|");
-                        String action = parts[0];
-                        String senderId = parts[1];
-                        String clockData = parts[parts.length - 1];
+                String[] parts = message.split("\\|");
+                String action = parts[0];
+                String senderId = parts[1];
+                String clockData = parts[parts.length - 1];
 
-                        // Synchronize the local vector clock with the received clock data
-                        if (!senderId.equals(localPlayerId)) {
-                            networkManager.updateClock(clockData);
+                // Synchronize the local vector clock with the received clock data
+                if (!senderId.equals(localPlayerId)) {
+                    networkManager.updateClock(clockData);
+                }
+
+                if ("STATE_REQUEST".equals(action)) {
+                    // Ignore our own state requests
+                    if (!senderId.equals(localPlayerId)) {
+                        boolean amILeader = amITheLeader(localPlayerId, activePlayersList);
+
+                        if (!activePlayersList.contains(senderId)) {
+                            activePlayersList.add(senderId);
                         }
 
-                        if ("STATE_REQUEST".equals(action)) {
-                            // Ignore our own state requests
-                            if (!senderId.equals(localPlayerId)) {
-                                if (!activePlayersList.contains(senderId)) {
-                                    activePlayersList.add(senderId);
+                        if (amILeader) {
+                            System.out.println("Sending state to " + senderId);
+                            String playersStr = String.join(",", activePlayersList);
+                            // Send serialized board state
+                            networkManager.publishStateReply(senderId, board.serializeState(), playersStr);
+                            // Send game info to update the number of active players
+                            networkManager.publishGameInfo(targetGameId, activePlayersList.size());
+                        }
+                    }
+                }
+                // Recovery
+                else if ("STATE_REPLY".equals(action)) {
+                    String targetId = parts[2];
+                    String serializedBoard = parts[3];
+                    String activePlayersStr = parts[4];
+
+                    // If I am the target, deserialize the state and update the view
+                    if (targetId.equals(localPlayerId)) {
+                        System.out.println("State received, synchronization...");
+                        board.deserializeState(serializedBoard);
+
+                        // Update active players list
+                        activePlayersList.clear();
+                        for (String p : activePlayersStr.split(",")) {
+                            if (!p.isEmpty()) {
+                                activePlayersList.add(p);
+                            }
+                        }
+
+                        // Update View
+                        for (int r = 0; r < 9; r++) {
+                            for (int c = 0; c < 9; c++) {
+                                int val = board.getValue(r, c);
+                                String sel = board.getSelectedBy(r, c);
+
+                                if (val != 0) {
+                                    view.updateCellValue(r, c, val);
                                 }
-
-                                if (amITheLeader(localPlayerId, activePlayersList)) {
-                                    System.out.println("Sending state to " + senderId);
-                                    networkManager.publishStateReply(senderId, board.serializeState());
+                                if (sel != null) {
+                                    Color playerColor = sel.equals(localPlayerId) ? Color.CYAN : Color.YELLOW;
+                                    view.updateCellSelection(r, c, sel, playerColor);
                                 }
                             }
                         }
-                        // Recovery
-                        else if ("STATE_REPLY".equals(action)) {
-                            String targetId = parts[2];
-                            String serializedBoard = parts[3];
+                    }
+                }
+                else if ("SELECT".equals(action)) {
+                    int row = Integer.parseInt(parts[2]);
+                    int col = Integer.parseInt(parts[3]);
 
-                            // If I am the target, deserialize the state and update the view
-                            if (targetId.equals(localPlayerId)) {
-                                System.out.println("State received, synchronization...");
-                                board.deserializeState(serializedBoard);
+                    board.setSelection(row, col, senderId);
+                    Color playerColor = senderId.equals(localPlayerId) ? Color.CYAN : Color.YELLOW;
+                    view.updateCellSelection(row, col, senderId, playerColor);
+                } else if ("DESELECT".equals(action)) {
+                    int row = Integer.parseInt(parts[2]);
+                    int col = Integer.parseInt(parts[3]);
 
-                                // Update View
-                                for (int r = 0; r < 9; r++) {
-                                    for (int c = 0; c < 9; c++) {
-                                        int val = board.getValue(r, c);
-                                        String sel = board.getSelectedBy(r, c);
+                    if (senderId.equals(board.getSelectedBy(row, col))) {
+                        board.clearSelection(row, col);
+                        view.clearCellSelection(row, col);
+                    }
+                } else if ("INSERT".equals(action)) {
+                    int row = Integer.parseInt(parts[2]);
+                    int col = Integer.parseInt(parts[3]);
 
-                                        if (val != 0) {
-                                            view.updateCellValue(r, c, val);
-                                        }
-                                        if (sel != null) {
-                                            Color playerColor = sel.equals(localPlayerId) ? Color.CYAN : Color.YELLOW;
-                                            view.updateCellSelection(r, c, sel, playerColor);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        else if ("SELECT".equals(action)) {
-                            int row = Integer.parseInt(parts[2]);
-                            int col = Integer.parseInt(parts[3]);
+                    int value = Integer.parseInt(parts[4]);
+                    board.setValue(row, col, value);
+                    board.clearSelection(row, col);
 
-                            board.setSelection(row, col, senderId);
-                            Color playerColor = senderId.equals(localPlayerId) ? Color.CYAN : Color.YELLOW;
-                            view.updateCellSelection(row, col, senderId, playerColor);
-                        } else if ("DESELECT".equals(action)) {
-                            int row = Integer.parseInt(parts[2]);
-                            int col = Integer.parseInt(parts[3]);
+                    view.updateCellValue(row, col, value);
+                    view.clearCellSelection(row, col);
 
-                            if (senderId.equals(board.getSelectedBy(row, col))) {
-                                board.clearSelection(row, col);
-                                view.clearCellSelection(row, col);
-                            }
-                        } else if ("INSERT".equals(action)) {
-                            int row = Integer.parseInt(parts[2]);
-                            int col = Integer.parseInt(parts[3]);
-
-                            int value = Integer.parseInt(parts[4]);
-                            board.setValue(row, col, value);
-                            board.clearSelection(row, col);
-
-                            view.updateCellValue(row, col, value);
-                            view.clearCellSelection(row, col);
-
-                            if (senderId.equals(localPlayerId)) {
-                                localSelectedRow.set(-1);
-                                localSelectedCol.set(-1);
-                            }
-                        }
-                    });
+                    if (senderId.equals(localPlayerId)) {
+                        localSelectedRow.set(-1);
+                        localSelectedCol.set(-1);
+                    }
+                }
+            });
             // After listening on the exchange, we request the state from the others
             networkManager.publishStateRequest();
             view.display();
-
         } catch (Exception e) {
-            System.err.println("Failed to connect to RabbitMQ. Make sure the broker is running.");
+            System.err.println("Failed to start the game.");
         }
     }
 
