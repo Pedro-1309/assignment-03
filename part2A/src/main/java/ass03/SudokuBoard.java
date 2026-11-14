@@ -28,24 +28,29 @@ public class SudokuBoard {
     }
 
     public void loadInitialBoard() {
-        int[][] board = {
-                {5, 3, 0, 0, 7, 0, 0, 0, 0},
-                {6, 0, 0, 1, 9, 5, 0, 0, 0},
-                {0, 9, 8, 0, 0, 0, 0, 6, 0},
-                {8, 0, 0, 0, 6, 0, 0, 0, 3},
-                {4, 0, 0, 8, 0, 3, 0, 0, 1},
-                {7, 0, 0, 0, 2, 0, 0, 0, 6},
-                {0, 6, 0, 0, 0, 0, 2, 8, 0},
-                {0, 0, 0, 4, 1, 9, 0, 0, 5},
-                {0, 0, 0, 0, 8, 0, 0, 7, 9}
-        };
+        int[][] board = SudokuGridGenerator.getRandomBoard();
         for (int r = 0; r < GRID_SIZE; r++) {
             for (int c = 0; c < GRID_SIZE; c++) {
                 if (board[r][c] != 0) {
                     grid[r][c] = board[r][c];
                     fixedCells[r][c] = true;
                     insertedBy[r][c] = "SYSTEM";
+                } else {
+                    grid[r][c] = 0;
+                    fixedCells[r][c] = false;
+                    insertedBy[r][c] = null;
                 }
+            }
+        }
+    }
+
+    public void clearBoard() {
+        for (int r = 0; r < GRID_SIZE; r++) {
+            for (int c = 0; c < GRID_SIZE; c++) {
+                grid[r][c] = 0;
+                fixedCells[r][c] = false;
+                insertedBy[r][c] = null;
+                selectedBy[r][c] = null;
             }
         }
     }

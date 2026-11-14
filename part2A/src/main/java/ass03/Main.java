@@ -1,6 +1,7 @@
 package ass03;
 
 import javax.swing.*;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -45,14 +46,22 @@ public class Main {
                 @Override
                 public void onJoinGame(String gameId) {
                     targetGameId = gameId;
+                    board.clearBoard(); // Reset local board
                     lobbyView.hideView();
                     startGame(targetGameId, localPlayerId, networkManager, board, lobbyView);
                 }
 
                 @Override
                 public void onCreateNewGame() {
-                    targetGameId = myCurrentGameId;
+                    targetGameId = "Match-" + (int)(Math.random() * 1000);
+                    board.clearBoard(); // Reset local board
                     board.loadInitialBoard();
+                    try {
+                        // Save the initial state
+                        networkManager.retainGameState(targetGameId, board.serializeState());
+                    } catch (Exception ex) {
+                        ex.printStackTrace();
+                    }
                     networkManager.publishGameInfo(targetGameId, 1);
                     lobbyView.hideView();
                     startGame(targetGameId, localPlayerId, networkManager, board, lobbyView);
@@ -67,9 +76,33 @@ public class Main {
 
     private static void startGame(String targetGameId, String localPlayerId, RabbitMQManager networkManager, SudokuBoard board, LobbyView lobbyView) {
         SudokuView view = new SudokuView(localPlayerId);
+
         try {
-            view.updateActivePlayers(activePlayersList);
-            view.appendLog("Joined match: " + targetGameId);
+            String savedState = networkManager.getRetainedGameState(targetGameId);
+            if (!"EMPTY".equals(savedState)) {
+                board.deserializeState(savedState);
+
+                for (int r = 0; r < 9; r++) {
+                    for (int c = 0; c < 9; c++) {
+                        int val = board.getValue(r, c);
+                        String sel = board.getSelectedBy(r, c);
+                        String inserter = board.getInsertedBy(r, c);
+
+                        if (val != 0) {
+                            view.updateCellValue(r, c, val, inserter != null ? inserter : "SYSTEM");
+                        }
+                        if (sel != null) {
+                            view.updateCellSelection(r, c, sel);
+                        }
+                    }
+                }
+            }
+
+            // To update the number of active players in lobby view
+            if (amITheLeader(localPlayerId, activePlayersList)) {
+                networkManager.publishGameInfo(targetGameId, activePlayersList.size());
+            }
+
             view.setListener(new SudokuView.SudokuActionListener() {
                 @Override
                 public void onCellSelected(int row, int col) {
@@ -207,6 +240,11 @@ public class Main {
 
                     board.setSelection(row, col, senderId);
                     view.updateCellSelection(row, col, senderId);
+                    try {
+                        networkManager.retainGameState(targetGameId, board.serializeState());
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    }
                 } else if ("DESELECT".equals(action)) {
                     int row = Integer.parseInt(parts[2]);
                     int col = Integer.parseInt(parts[3]);
@@ -214,6 +252,11 @@ public class Main {
                     if (senderId.equals(board.getSelectedBy(row, col))) {
                         board.clearSelection(row, col);
                         view.clearCellSelection(row, col);
+                        try {
+                            networkManager.retainGameState(targetGameId, board.serializeState());
+                        } catch (IOException e) {
+                            e.printStackTrace();
+                        }
                     }
                 } else if ("INSERT".equals(action)) {
                     int row = Integer.parseInt(parts[2]);
@@ -233,6 +276,11 @@ public class Main {
                     if (senderId.equals(localPlayerId)) {
                         localSelectedRow.set(-1);
                         localSelectedCol.set(-1);
+                        try {
+                            networkManager.retainGameState(targetGameId, board.serializeState());
+                        } catch (IOException e) {
+                            e.printStackTrace();
+                        }
                     }
                 } else if ("QUIT".equals(action)) {
                     if (activePlayersList.contains(senderId)) {

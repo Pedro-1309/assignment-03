@@ -1,9 +1,6 @@
 package ass03;
 
-import com.rabbitmq.client.Channel;
-import com.rabbitmq.client.Connection;
-import com.rabbitmq.client.ConnectionFactory;
-import com.rabbitmq.client.DeliverCallback;
+import com.rabbitmq.client.*;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -73,6 +70,7 @@ public class RabbitMQManager {
     public void leaveGame() throws IOException, TimeoutException {
         if (currentQueueName != null && channel != null && channel.isOpen()) {
             channel.queueUnbind(currentQueueName, currentGameExchange, "");
+            channel.queuePurge(currentQueueName); // Clear any remaining messages in queue
             System.out.println(" [" + playerId + "] Left the game exchange: " + currentGameExchange);
         }
         currentGameExchange = null;
@@ -176,7 +174,6 @@ public class RabbitMQManager {
         vectorClock.put(playerId, current + 1);
     }
 
-    //To include in timestamps
     private String serializeClock() {
         StringBuilder sb = new StringBuilder();
         for (Map.Entry<String, Integer> entry : vectorClock.entrySet()) {
@@ -200,5 +197,35 @@ public class RabbitMQManager {
                 vectorClock.put(pId, Math.max(localClockVal, msgClockVal));
             }
         }
+    }
+
+    // Saves match last state
+    public void retainGameState(String gameId, String serializedState) throws IOException {
+        String stateQueue = gameId + "_STATE";
+
+        // Persistent queue with max-length=1 to retain only the last state
+        Map<String, Object> args = new HashMap<>();
+        args.put("x-max-length", 1);
+        channel.queueDeclare(stateQueue, true, false, false, args);
+
+        channel.basicPublish("", stateQueue, null, serializedState.getBytes());
+    }
+
+    // Reads last retained state
+    public String getRetainedGameState(String gameId) throws IOException {
+        String stateQueue = gameId + "_STATE";
+        Map<String, Object> args = new HashMap<>();
+        args.put("x-max-length", 1);
+        channel.queueDeclare(stateQueue, true, false, false, args);
+
+        // basicGet with autoAck=false reads the message without removing it from the queue
+        GetResponse response = channel.basicGet(stateQueue, false);
+        if (response != null) {
+            String state = new String(response.getBody());
+            // basicReject with requeue=true puts the message back in the queue
+            channel.basicReject(response.getEnvelope().getDeliveryTag(), true);
+            return state;
+        }
+        return "EMPTY";
     }
 }
