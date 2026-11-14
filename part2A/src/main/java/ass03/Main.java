@@ -1,6 +1,6 @@
 package ass03;
 
-import java.awt.Color;
+import javax.swing.*;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -36,10 +36,6 @@ public class Main {
                 @Override
                 public void onGameInfoReceived(String gameId, int playersCount) {
                     lobbyView.addAvailableGame(gameId, playersCount);
-//                    if (targetGameId == null) {
-//                        targetGameId = gameId;
-//                        System.out.println("Active game found: " + gameId + " with " + playersCount + " players.");
-//                    }
                 }
             });
 
@@ -50,15 +46,16 @@ public class Main {
                 public void onJoinGame(String gameId) {
                     targetGameId = gameId;
                     lobbyView.hideView();
-                    startGame(targetGameId, localPlayerId, networkManager, board);
+                    startGame(targetGameId, localPlayerId, networkManager, board, lobbyView);
                 }
 
                 @Override
                 public void onCreateNewGame() {
                     targetGameId = myCurrentGameId;
+                    board.loadInitialBoard();
                     networkManager.publishGameInfo(targetGameId, 1);
                     lobbyView.hideView();
-                    startGame(targetGameId, localPlayerId, networkManager, board);
+                    startGame(targetGameId, localPlayerId, networkManager, board, lobbyView);
                 }
             });
 
@@ -68,9 +65,11 @@ public class Main {
         }
     }
 
-    private static void startGame(String targetGameId, String localPlayerId, RabbitMQManager networkManager, SudokuBoard board) {
+    private static void startGame(String targetGameId, String localPlayerId, RabbitMQManager networkManager, SudokuBoard board, LobbyView lobbyView) {
         SudokuView view = new SudokuView(localPlayerId);
         try {
+            view.updateActivePlayers(activePlayersList);
+            view.appendLog("Joined match: " + targetGameId);
             view.setListener(new SudokuView.SudokuActionListener() {
                 @Override
                 public void onCellSelected(int row, int col) {
@@ -95,9 +94,13 @@ public class Main {
                 @Override
                 public void onNumberInserted(int row, int col, int value) {
                     if (localSelectedRow.get() == row && localSelectedCol.get() == col) {
-                        networkManager.publishNumberInsertion(row, col, value);
+                        if (board.isValidMove(row, col, value)) {
+                            networkManager.publishNumberInsertion(row, col, value);
+                        } else {
+                            JOptionPane.showMessageDialog(view, "Invalid move. Same number already exists in the row, column or 3x3 grid.");
+                        }
                     } else {
-                        System.out.println("You must select a cell to insert a value.");
+                        System.out.println("You must select the cell before inserting a number.");
                     }
                 }
 
@@ -110,13 +113,23 @@ public class Main {
                         networkManager.publishCellDeselection(currentRow, currentCol);
                     }
 
+                    networkManager.publishQuit();
+
                     try {
-                        networkManager.disconnect();
+                        networkManager.leaveGame();
+                        activePlayersList.clear();
+                        activePlayersList.add(localPlayerId);
+                        Main.targetGameId = null;
+
+                        lobbyView.display();
                     } catch (Exception ex) {
                         ex.printStackTrace();
                     }
                 }
             });
+
+            view.updateActivePlayers(activePlayersList);
+            view.appendLog("Joined match: " + targetGameId);
 
             networkManager.joinGame(targetGameId, message -> {
                 String[] parts = message.split("\\|");
@@ -136,6 +149,8 @@ public class Main {
 
                         if (!activePlayersList.contains(senderId)) {
                             activePlayersList.add(senderId);
+                            view.updateActivePlayers(activePlayersList);
+                            view.appendLog(senderId + " connected.");
                         }
 
                         if (amILeader) {
@@ -167,18 +182,20 @@ public class Main {
                             }
                         }
 
+                        view.updateActivePlayers(activePlayersList);
+
                         // Update View
                         for (int r = 0; r < 9; r++) {
                             for (int c = 0; c < 9; c++) {
                                 int val = board.getValue(r, c);
                                 String sel = board.getSelectedBy(r, c);
+                                String inserter = board.getInsertedBy(r, c);
 
                                 if (val != 0) {
-                                    view.updateCellValue(r, c, val);
+                                    view.updateCellValue(r, c, val, inserter);
                                 }
                                 if (sel != null) {
-                                    Color playerColor = sel.equals(localPlayerId) ? Color.CYAN : Color.YELLOW;
-                                    view.updateCellSelection(r, c, sel, playerColor);
+                                    view.updateCellSelection(r, c, sel);
                                 }
                             }
                         }
@@ -189,8 +206,7 @@ public class Main {
                     int col = Integer.parseInt(parts[3]);
 
                     board.setSelection(row, col, senderId);
-                    Color playerColor = senderId.equals(localPlayerId) ? Color.CYAN : Color.YELLOW;
-                    view.updateCellSelection(row, col, senderId, playerColor);
+                    view.updateCellSelection(row, col, senderId);
                 } else if ("DESELECT".equals(action)) {
                     int row = Integer.parseInt(parts[2]);
                     int col = Integer.parseInt(parts[3]);
@@ -202,25 +218,51 @@ public class Main {
                 } else if ("INSERT".equals(action)) {
                     int row = Integer.parseInt(parts[2]);
                     int col = Integer.parseInt(parts[3]);
-
                     int value = Integer.parseInt(parts[4]);
-                    board.setValue(row, col, value);
+                    board.setValue(row, col, value, senderId);
                     board.clearSelection(row, col);
 
-                    view.updateCellValue(row, col, value);
+                    view.updateCellValue(row, col, value, senderId);
                     view.clearCellSelection(row, col);
+                    if (value == 0) {
+                        view.appendLog(senderId + " cleared cell (" + row + "," + col + ")");
+                    } else {
+                        view.appendLog(senderId + " inserted " + value + " in cell (" + row + "," + col + ")");
+                    }
 
                     if (senderId.equals(localPlayerId)) {
                         localSelectedRow.set(-1);
                         localSelectedCol.set(-1);
                     }
+                } else if ("QUIT".equals(action)) {
+                    if (activePlayersList.contains(senderId)) {
+                        activePlayersList.remove(senderId);
+                        view.updateActivePlayers(activePlayersList);
+                        view.appendLog(senderId + " disconnected.");
+
+                        // If the current leader left, elect a new one
+                        if (amITheLeader(localPlayerId, activePlayersList)) {
+                            networkManager.publishGameInfo(targetGameId, activePlayersList.size());
+                        }
+                    }
                 }
             });
+            // Load the initial board
+            for (int r = 0; r < 9; r++) {
+                for (int c = 0; c < 9; c++) {
+                    int val = board.getValue(r, c);
+                    if (val != 0) {
+                        view.updateCellValue(r, c, val, board.getInsertedBy(r, c));
+                    }
+                }
+            }
+
             // After listening on the exchange, we request the state from the others
             networkManager.publishStateRequest();
             view.display();
         } catch (Exception e) {
             System.err.println("Failed to start the game.");
+            e.printStackTrace();
         }
     }
 

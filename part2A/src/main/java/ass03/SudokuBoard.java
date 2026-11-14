@@ -4,6 +4,8 @@ public class SudokuBoard {
     private static final int GRID_SIZE = 9;
     private final int[][] grid = new int[GRID_SIZE][GRID_SIZE];
     private final String[][] selectedBy = new String[GRID_SIZE][GRID_SIZE];
+    private boolean[][] fixedCells = new boolean[GRID_SIZE][GRID_SIZE];
+    private String[][] insertedBy = new String[GRID_SIZE][GRID_SIZE];
 
     public synchronized void setValue(int row, int col, int value) {
         grid[row][col] = value;
@@ -25,9 +27,66 @@ public class SudokuBoard {
         return selectedBy[row][col];
     }
 
+    public void loadInitialBoard() {
+        int[][] board = {
+                {5, 3, 0, 0, 7, 0, 0, 0, 0},
+                {6, 0, 0, 1, 9, 5, 0, 0, 0},
+                {0, 9, 8, 0, 0, 0, 0, 6, 0},
+                {8, 0, 0, 0, 6, 0, 0, 0, 3},
+                {4, 0, 0, 8, 0, 3, 0, 0, 1},
+                {7, 0, 0, 0, 2, 0, 0, 0, 6},
+                {0, 6, 0, 0, 0, 0, 2, 8, 0},
+                {0, 0, 0, 4, 1, 9, 0, 0, 5},
+                {0, 0, 0, 0, 8, 0, 0, 7, 9}
+        };
+        for (int r = 0; r < GRID_SIZE; r++) {
+            for (int c = 0; c < GRID_SIZE; c++) {
+                if (board[r][c] != 0) {
+                    grid[r][c] = board[r][c];
+                    fixedCells[r][c] = true;
+                    insertedBy[r][c] = "SYSTEM";
+                }
+            }
+        }
+    }
+
+    public boolean isValidMove(int row, int col, int value) {
+        if (fixedCells[row][col]) return false;
+        if (value == 0) return true; // Needed for canceling a number
+        if (value < 1 || value > 9) return false;
+
+        for (int i = 0; i < GRID_SIZE; i++) {
+            if (grid[row][i] == value && i != col) return false;
+            if (grid[i][col] == value && i != row) return false;
+        }
+
+        int startR = (row / 3) * 3;
+        int startC = (col / 3) * 3;
+        for (int r = startR; r < startR + 3; r++) {
+            for (int c = startC; c < startC + 3; c++) {
+                if (grid[r][c] == value && (r != row || c != col)) return false;
+            }
+        }
+        return true;
+    }
+
     public synchronized boolean canSelect(int row, int col, String localPlayerId) {
+        if (fixedCells[row][col]) return false;
         String currentSelector = selectedBy[row][col];
         return currentSelector == null || currentSelector.equals(localPlayerId);
+    }
+
+    public void setValue(int row, int col, int value, String playerId) {
+        grid[row][col] = value;
+        if (value == 0) {
+            insertedBy[row][col] = null;
+        } else {
+            insertedBy[row][col] = playerId;
+        }
+    }
+
+    public String getInsertedBy(int row, int col) {
+        return insertedBy[row][col];
     }
 
     public synchronized String serializeState() {
@@ -36,9 +95,13 @@ public class SudokuBoard {
             for (int c = 0; c < GRID_SIZE; c++) {
                 int val = grid[r][c];
                 String sel = selectedBy[r][c] == null ? "NONE" : selectedBy[r][c];
-                if (val != 0 || !sel.equals("NONE")) {
-                    // Format: r,c,value,selector;
-                    sb.append(r).append(",").append(c).append(",").append(val).append(",").append(sel).append(";");
+                boolean isFixed = fixedCells[r][c];
+                String inserter = insertedBy[r][c] == null ? "NONE" : insertedBy[r][c];
+
+                if (val != 0 || !sel.equals("NONE") || isFixed) {
+                    // Format: r,c,value,selector,isFixed,inserter;
+                    sb.append(r).append(",").append(c).append(",").append(val).append(",")
+                            .append(sel).append(",").append(isFixed).append(",").append(inserter).append(";");
                 }
             }
         }
@@ -56,10 +119,16 @@ public class SudokuBoard {
             int c = Integer.parseInt(parts[1]);
             int val = Integer.parseInt(parts[2]);
             String sel = parts[3];
+            boolean isFixed = Boolean.parseBoolean(parts[4]);
+            String inserter = parts[5];
 
             grid[r][c] = val;
+            fixedCells[r][c] = isFixed;
             if (!"NONE".equals(sel)) {
                 selectedBy[r][c] = sel;
+            }
+            if (!"NONE".equals(inserter)) {
+                insertedBy[r][c] = inserter;
             }
         }
     }

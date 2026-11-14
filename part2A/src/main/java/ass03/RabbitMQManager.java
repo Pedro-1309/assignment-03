@@ -70,11 +70,12 @@ public class RabbitMQManager {
         System.out.println(" [" + playerId + "] Joined game: " + currentGameExchange);
     }
 
-    public void leaveGame() throws IOException {
-        if (currentQueueName != null) {
+    public void leaveGame() throws IOException, TimeoutException {
+        if (currentQueueName != null && channel != null && channel.isOpen()) {
             channel.queueUnbind(currentQueueName, currentGameExchange, "");
-            System.out.println(" [" + playerId + "] Left game: " + currentGameExchange);
+            System.out.println(" [" + playerId + "] Left the game exchange: " + currentGameExchange);
         }
+        currentGameExchange = null;
     }
     public void publishCellSelection(int row, int col) {
         incrementLocalClock();
@@ -142,6 +143,12 @@ public class RabbitMQManager {
         incrementLocalClock();
         String message = String.format("STATE_REPLY|%s|%s|%s|%s|%s",
                 playerId, requesterId, serializedBoard, activePlayersStr, serializeClock());
+        publishToExchange(currentGameExchange, message);
+    }
+
+    public void publishQuit() {
+        incrementLocalClock();
+        String message = String.format("QUIT|%s|%s", playerId, serializeClock());
         publishToExchange(currentGameExchange, message);
     }
 

@@ -4,14 +4,23 @@ import javax.swing.*;
 import java.awt.*;
 import java.awt.event.KeyAdapter;
 import java.awt.event.KeyEvent;
+import java.util.HashMap;
+import java.util.Map;
 
 public class SudokuView extends JFrame {
 
     private static final int GRID_SIZE = 9;
     private final JButton[][] cells = new JButton[GRID_SIZE][GRID_SIZE];
     private SudokuActionListener listener;
+    private final String localPlayerId;
 
-    // Interfaccia per delegare le azioni utente al Controller/NetworkManager
+    private final DefaultListModel<String> playersListModel;
+    private final JList<String> playersList;
+    private final JTextArea logArea;
+    private final JButton leaveBtn;
+
+    private final Map<String, Color> playerColors = new HashMap<>();
+
     public interface SudokuActionListener {
         void onCellSelected(int row, int col);
         void onNumberInserted(int row, int col, int value);
@@ -19,10 +28,73 @@ public class SudokuView extends JFrame {
     }
 
     public SudokuView(String localPlayerId) {
+        this.localPlayerId = localPlayerId;
         setTitle("Cooperative Sudoku - Player: " + localPlayerId);
-        setSize(600, 600);
+        setSize(850, 600);
         setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
-        setLayout(new GridLayout(GRID_SIZE, GRID_SIZE));
+        setLayout(new BorderLayout());
+
+        // Grid
+        JPanel gridPanel = new JPanel(new GridLayout(GRID_SIZE, GRID_SIZE));
+        initializeGrid(gridPanel);
+        gridPanel.setPreferredSize(new Dimension(600, 600));
+        add(gridPanel, BorderLayout.CENTER);
+
+        // Side Panel
+        JPanel sidePanel = new JPanel(new BorderLayout());
+        sidePanel.setPreferredSize(new Dimension(250, 600));
+        sidePanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+
+        playersListModel = new DefaultListModel<>();
+        playersList = new JList<>(playersListModel);
+        playersList.setCellRenderer(new DefaultListCellRenderer() {
+            @Override
+            public Component getListCellRendererComponent(JList<?> list, Object value, int index, boolean isSelected, boolean cellHasFocus) {
+                Component c = super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
+                String displayStr = (String) value;
+
+                // Extract the player ID (removes the " (You)" part if present)
+                String playerId = displayStr.split(" ")[0];
+
+                // Get player's color and make it darker
+                Color pColor = getPlayerColor(playerId);
+                c.setForeground(pColor.darker().darker());
+
+                if (!isSelected) {
+                    c.setBackground(Color.WHITE);
+                }
+                return c;
+            }
+        });
+        JScrollPane playersScroll = new JScrollPane(playersList);
+        playersScroll.setBorder(BorderFactory.createTitledBorder("Active Players"));
+        playersScroll.setPreferredSize(new Dimension(230, 150));
+
+        logArea = new JTextArea();
+        logArea.setEditable(false);
+        logArea.setLineWrap(true);
+        JScrollPane logScroll = new JScrollPane(logArea);
+        logScroll.setBorder(BorderFactory.createTitledBorder("Match Events"));
+
+        leaveBtn = new JButton("Leave Match");
+        leaveBtn.setBackground(new Color(255, 100, 100));
+        leaveBtn.setForeground(Color.WHITE);
+        leaveBtn.setFocusPainted(false);
+
+        leaveBtn.addActionListener(e -> {
+            if (listener != null) {
+                listener.onQuit();
+            }
+            dispose();
+        });
+
+        JPanel topSidePanel = new JPanel(new BorderLayout());
+        topSidePanel.add(playersScroll, BorderLayout.CENTER);
+        sidePanel.add(topSidePanel, BorderLayout.NORTH);
+        sidePanel.add(logScroll, BorderLayout.CENTER);
+        sidePanel.add(leaveBtn, BorderLayout.SOUTH);
+
+        add(sidePanel, BorderLayout.EAST);
 
         // Closing the window -> leaving the game and notify the controller
         addWindowListener(new java.awt.event.WindowAdapter() {
@@ -31,18 +103,17 @@ public class SudokuView extends JFrame {
                 if (listener != null) {
                     listener.onQuit();
                 }
-                System.exit(0);
+                dispose();
             }
         });
 
-        initializeGrid();
     }
 
     public void setListener(SudokuActionListener listener) {
         this.listener = listener;
     }
 
-    private void initializeGrid() {
+    private void initializeGrid(JPanel panel) {
         for (int row = 0; row < GRID_SIZE; row++) {
             for (int col = 0; col < GRID_SIZE; col++) {
                 JButton btn = new JButton("");
@@ -50,61 +121,108 @@ public class SudokuView extends JFrame {
                 btn.setBackground(Color.WHITE);
                 btn.setFocusPainted(false);
 
+                // Borders 3x3
+                int top = (row % 3 == 0) ? 3 : 1;
+                int left = (col % 3 == 0) ? 3 : 1;
+                int bottom = (row == 8) ? 3 : 1;
+                int right = (col == 8) ? 3 : 1;
+                btn.setBorder(BorderFactory.createMatteBorder(top, left, bottom, right, Color.BLACK));
+
                 final int r = row;
                 final int c = col;
 
-                // 1. Gestione della SELEZIONE della casella (Click)
+                // Cell selection
                 btn.addActionListener(e -> {
                     if (listener != null) {
                         listener.onCellSelected(r, c);
                     }
                 });
 
-                // 2. Gestione dell'INSERIMENTO del valore (Tastiera)
+                // Number insertion
                 btn.addKeyListener(new KeyAdapter() {
                     @Override
                     public void keyTyped(KeyEvent e) {
                         char keyChar = e.getKeyChar();
                         if (listener != null) {
-                            if (keyChar >= '1' && keyChar <= '9') {
-                                listener.onNumberInserted(r, c, keyChar - '0');
-                            } else if (keyChar == '\b' || keyChar == '0') {
-                                // Usa Backspace o 0 per svuotare la cella
-                                listener.onNumberInserted(r, c, 0);
+                            if (Character.isDigit(keyChar)) {
+                                int value = Character.getNumericValue(keyChar);
+                                if (listener != null) {
+                                    listener.onNumberInserted(r, c, value);
+                                }
+                            } else if (keyChar == '\b' || keyChar == 127) { // Backspace or Canc
+                                if (listener != null) {
+                                    listener.onNumberInserted(r, c, 0); // 0 means cancel
+                                }
                             }
                         }
                     }
                 });
 
                 cells[row][col] = btn;
-                add(btn);
+                panel.add(btn);
             }
         }
     }
 
-    // --- METODI THREAD-SAFE PER L'AGGIORNAMENTO DALL'ESTERNO (RABBITMQ) ---
-
-    public void updateCellValue(int row, int col, int value) {
+    public void updateCellValue(int row, int col, int value, String playerId) {
         SwingUtilities.invokeLater(() -> {
-            cells[row][col].setText(value == 0 ? "" : String.valueOf(value));
+            if (value == 0) {
+                cells[row][col].setText("");
+                cells[row][col].setForeground(Color.BLACK);
+            } else {
+                cells[row][col].setText(String.valueOf(value));
+                if ("SYSTEM".equals(playerId)) {
+                    cells[row][col].setForeground(Color.BLACK);
+                } else {
+                    Color pColor = getPlayerColor(playerId);
+                    cells[row][col].setForeground(pColor.darker().darker());
+                }
+            }
         });
     }
 
-    public void updateCellSelection(int row, int col, String playerId, Color playerColor) {
+    public void updateCellSelection(int row, int col, String playerId) {
         SwingUtilities.invokeLater(() -> {
-            cells[row][col].setBackground(playerColor);
-            cells[row][col].setToolTipText("Selected by: " + playerId);
+            Color pColor = getPlayerColor(playerId);
+            cells[row][col].setBackground(pColor);
         });
     }
 
     public void clearCellSelection(int row, int col) {
-        SwingUtilities.invokeLater(() -> {
-            cells[row][col].setBackground(Color.WHITE);
-            cells[row][col].setToolTipText(null);
-        });
+        SwingUtilities.invokeLater(() -> cells[row][col].setBackground(Color.WHITE));
     }
 
     public void display() {
         SwingUtilities.invokeLater(() -> setVisible(true));
+    }
+
+    private Color getPlayerColor(String playerId) {
+        if (playerId.equals(localPlayerId)) {
+            return Color.CYAN; // Local player
+        }
+        return playerColors.computeIfAbsent(playerId, id -> {
+            float hue = (Math.abs(id.hashCode()) % 360) / 360.0f;
+            return Color.getHSBColor(hue, 1.0f, 1.0f);
+        });
+    }
+
+    public void updateActivePlayers(java.util.List<String> players) {
+        SwingUtilities.invokeLater(() -> {
+            playersListModel.clear();
+            for (String p : players) {
+                if (p.equals(localPlayerId)) {
+                    playersListModel.addElement(p + " (You)");
+                } else {
+                    playersListModel.addElement(p);
+                }
+            }
+        });
+    }
+
+    public void appendLog(String message) {
+        SwingUtilities.invokeLater(() -> {
+            logArea.append(message + "\n");
+            logArea.setCaretPosition(logArea.getDocument().getLength()); // Scroll to the bottom
+        });
     }
 }
