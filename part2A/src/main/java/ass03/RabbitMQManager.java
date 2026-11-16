@@ -131,16 +131,16 @@ public class RabbitMQManager {
         publishToExchange(LOBBY_EXCHANGE, message);
     }
 
-    public void publishStateRequest() {
+    public void publishJoin() {
         incrementLocalClock();
-        String message = String.format("STATE_REQUEST|%s|%s", playerId, serializeClock());
+        String message = String.format("JOIN|%s|%s", playerId, serializeClock());
         publishToExchange(currentGameExchange, message);
     }
 
-    public void publishStateReply(String requesterId, String serializedBoard, String activePlayersStr) {
+    public void publishSyncPlayers(String targetId, String activePlayersStr) {
         incrementLocalClock();
-        String message = String.format("STATE_REPLY|%s|%s|%s|%s|%s",
-                playerId, requesterId, serializedBoard, activePlayersStr, serializeClock());
+        String message = String.format("SYNC_PLAYERS|%s|%s|%s|%s",
+                playerId, targetId, activePlayersStr, serializeClock());
         publishToExchange(currentGameExchange, message);
     }
 

@@ -11,7 +11,6 @@ public class Main {
     private static final AtomicInteger localSelectedCol = new AtomicInteger(-1);
 
     private static final List<String> activePlayersList = new ArrayList<>();
-    private static final String myCurrentGameId = "Match-" + (int)(Math.random() * 100);
     private static String targetGameId = null;
 
     public static void main(String[] args) {
@@ -30,7 +29,7 @@ public class Main {
                 public void onListGamesRequest(String requesterId) {
                     // "Leader Election" between players to decide who will respond with game info
                     if (targetGameId != null && amITheLeader(localPlayerId, activePlayersList)) {
-                        networkManager.publishGameInfo(myCurrentGameId, activePlayersList.size());
+                        networkManager.publishGameInfo(targetGameId, activePlayersList.size());
                     }
                 }
 
@@ -148,12 +147,16 @@ public class Main {
 
                     networkManager.publishQuit();
 
+                    if (activePlayersList.size() == 1 && activePlayersList.contains(localPlayerId)) {
+                        networkManager.publishGameInfo(targetGameId, 0);
+                    }
+
+                    activePlayersList.clear();
+                    activePlayersList.add(localPlayerId);
+                    Main.targetGameId = null;
+
                     try {
                         networkManager.leaveGame();
-                        activePlayersList.clear();
-                        activePlayersList.add(localPlayerId);
-                        Main.targetGameId = null;
-
                         lobbyView.display();
                     } catch (Exception ex) {
                         ex.printStackTrace();
@@ -175,8 +178,7 @@ public class Main {
                     networkManager.updateClock(clockData);
                 }
 
-                if ("STATE_REQUEST".equals(action)) {
-                    // Ignore our own state requests
+                if ("JOIN".equals(action)) {
                     if (!senderId.equals(localPlayerId)) {
                         boolean amILeader = amITheLeader(localPlayerId, activePlayersList);
 
@@ -187,51 +189,24 @@ public class Main {
                         }
 
                         if (amILeader) {
-                            System.out.println("Sending state to " + senderId);
                             String playersStr = String.join(",", activePlayersList);
-                            // Send serialized board state
-                            networkManager.publishStateReply(senderId, board.serializeState(), playersStr);
-                            // Send game info to update the number of active players
+                            networkManager.publishSyncPlayers(senderId, playersStr);
                             networkManager.publishGameInfo(targetGameId, activePlayersList.size());
                         }
                     }
                 }
-                // Recovery
-                else if ("STATE_REPLY".equals(action)) {
+                else if ("SYNC_PLAYERS".equals(action)) {
                     String targetId = parts[2];
-                    String serializedBoard = parts[3];
-                    String activePlayersStr = parts[4];
+                    String activePlayersStr = parts[3];
 
-                    // If I am the target, deserialize the state and update the view
                     if (targetId.equals(localPlayerId)) {
-                        System.out.println("State received, synchronization...");
-                        board.deserializeState(serializedBoard);
-
-                        // Update active players list
                         activePlayersList.clear();
                         for (String p : activePlayersStr.split(",")) {
                             if (!p.isEmpty()) {
                                 activePlayersList.add(p);
                             }
                         }
-
                         view.updateActivePlayers(activePlayersList);
-
-                        // Update View
-                        for (int r = 0; r < 9; r++) {
-                            for (int c = 0; c < 9; c++) {
-                                int val = board.getValue(r, c);
-                                String sel = board.getSelectedBy(r, c);
-                                String inserter = board.getInsertedBy(r, c);
-
-                                if (val != 0) {
-                                    view.updateCellValue(r, c, val, inserter);
-                                }
-                                if (sel != null) {
-                                    view.updateCellSelection(r, c, sel);
-                                }
-                            }
-                        }
                     }
                 }
                 else if ("SELECT".equals(action)) {
@@ -283,14 +258,16 @@ public class Main {
                         }
                     }
                 } else if ("QUIT".equals(action)) {
-                    if (activePlayersList.contains(senderId)) {
-                        activePlayersList.remove(senderId);
-                        view.updateActivePlayers(activePlayersList);
-                        view.appendLog(senderId + " disconnected.");
+                    if (!senderId.equals(localPlayerId)) {
+                        if (activePlayersList.contains(senderId)) {
+                            activePlayersList.remove(senderId);
+                            view.updateActivePlayers(activePlayersList);
+                            view.appendLog(senderId + " disconnected.");
 
-                        // If the current leader left, elect a new one
-                        if (amITheLeader(localPlayerId, activePlayersList)) {
-                            networkManager.publishGameInfo(targetGameId, activePlayersList.size());
+                            // If the current leader left, elect a new one
+                            if (amITheLeader(localPlayerId, activePlayersList)) {
+                                networkManager.publishGameInfo(targetGameId, activePlayersList.size());
+                            }
                         }
                     }
                 }
@@ -305,8 +282,7 @@ public class Main {
                 }
             }
 
-            // After listening on the exchange, we request the state from the others
-            networkManager.publishStateRequest();
+            networkManager.publishJoin();
             view.display();
         } catch (Exception e) {
             System.err.println("Failed to start the game.");

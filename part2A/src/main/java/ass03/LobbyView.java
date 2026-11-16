@@ -16,7 +16,7 @@ public class LobbyView extends JFrame {
     }
 
     public LobbyView() {
-        setTitle("Sudoku Cooperative - Lobby");
+        setTitle("Cooperative Sudoku - Lobby");
         setSize(400, 300);
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setLayout(new BorderLayout());
