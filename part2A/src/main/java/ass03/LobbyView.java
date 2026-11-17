@@ -79,6 +79,18 @@ public class LobbyView extends JFrame {
         });
     }
 
+    public void removeAvailableGame(String gameId) {
+        SwingUtilities.invokeLater(() -> {
+            for (int i = 0; i < gamesModel.size(); i++) {
+                String item = gamesModel.getElementAt(i);
+                if (item.startsWith(gameId)) {
+                    gamesModel.remove(i);
+                    break;
+                }
+            }
+        });
+    }
+
     public void display() {
         SwingUtilities.invokeLater(() -> setVisible(true));
     }

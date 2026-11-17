@@ -219,6 +219,19 @@ public class SudokuView extends JFrame {
         });
     }
 
+    public void showGameCompleteDialog() {
+        SwingUtilities.invokeLater(() -> {
+            JOptionPane.showMessageDialog(this,
+                    "Congratulations! The board is complete.",
+                    "Game Over",
+                    JOptionPane.INFORMATION_MESSAGE);
+            if (listener != null) {
+                listener.onQuit();
+            }
+            dispose();
+        });
+    }
+
     public void appendLog(String message) {
         SwingUtilities.invokeLater(() -> {
             logArea.append(message + "\n");

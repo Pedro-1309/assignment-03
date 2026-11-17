@@ -9,9 +9,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class Main {
     private static final AtomicInteger localSelectedRow = new AtomicInteger(-1);
     private static final AtomicInteger localSelectedCol = new AtomicInteger(-1);
-
     private static final List<String> activePlayersList = new ArrayList<>();
     private static String targetGameId = null;
+    private static boolean isGameOver = false;
 
     public static void main(String[] args) {
         String localPlayerId = "Player-" + (int) (Math.random() * 1000);
@@ -35,7 +35,11 @@ public class Main {
 
                 @Override
                 public void onGameInfoReceived(String gameId, int playersCount) {
-                    lobbyView.addAvailableGame(gameId, playersCount);
+                    if (playersCount <= -1) {
+                        lobbyView.removeAvailableGame(gameId);
+                    } else {
+                        lobbyView.addAvailableGame(gameId, playersCount);
+                    }
                 }
             });
 
@@ -74,12 +78,27 @@ public class Main {
     }
 
     private static void startGame(String targetGameId, String localPlayerId, RabbitMQManager networkManager, SudokuBoard board, LobbyView lobbyView) {
+        isGameOver = false;
         SudokuView view = new SudokuView(localPlayerId);
 
         try {
             String savedState = networkManager.getRetainedGameState(targetGameId);
             if (!"EMPTY".equals(savedState)) {
                 board.deserializeState(savedState);
+
+                if (board.isComplete()) {
+                    JOptionPane.showMessageDialog(lobbyView, "This game is already completed.", "Game Over", JOptionPane.INFORMATION_MESSAGE);
+                    networkManager.publishGameInfo(targetGameId, -1);
+
+                    try {
+                        networkManager.leaveGame();
+                    } catch (Exception ex) {
+                        ex.printStackTrace();
+                    }
+
+                    lobbyView.display();
+                    return;
+                }
 
                 for (int r = 0; r < 9; r++) {
                     for (int c = 0; c < 9; c++) {
@@ -145,10 +164,11 @@ public class Main {
                         networkManager.publishCellDeselection(currentRow, currentCol);
                     }
 
-                    networkManager.publishQuit();
-
-                    if (activePlayersList.size() == 1 && activePlayersList.contains(localPlayerId)) {
-                        networkManager.publishGameInfo(targetGameId, 0);
+                    if (!isGameOver) {
+                        networkManager.publishQuit();
+                        if (activePlayersList.size() == 1 && activePlayersList.contains(localPlayerId)) {
+                            networkManager.publishGameInfo(targetGameId, 0);
+                        }
                     }
 
                     activePlayersList.clear();
@@ -257,6 +277,15 @@ public class Main {
                             e.printStackTrace();
                         }
                     }
+
+                    if (board.isComplete()) {
+                        isGameOver = true;
+                        if (senderId.equals(localPlayerId)) {
+                            networkManager.publishGameOver();
+                            networkManager.deleteRetainedGameState(targetGameId);
+                            networkManager.publishGameInfo(targetGameId, -1);
+                        }
+                    }
                 } else if ("QUIT".equals(action)) {
                     if (!senderId.equals(localPlayerId)) {
                         if (activePlayersList.contains(senderId)) {
@@ -270,6 +299,9 @@ public class Main {
                             }
                         }
                     }
+                } else if ("GAME_OVER".equals(action)) {
+                    isGameOver = true;
+                    view.showGameCompleteDialog();
                 }
             });
             // Load the initial board

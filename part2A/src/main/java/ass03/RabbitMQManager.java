@@ -150,6 +150,12 @@ public class RabbitMQManager {
         publishToExchange(currentGameExchange, message);
     }
 
+    public void publishGameOver() {
+        incrementLocalClock();
+        String message = String.format("GAME_OVER|%s|%s", playerId, serializeClock());
+        publishToExchange(currentGameExchange, message);
+    }
+
     private void publishToExchange(String exchangeName, String message) {
         if (channel != null && channel.isOpen()) {
             try {
@@ -227,5 +233,14 @@ public class RabbitMQManager {
             return state;
         }
         return "EMPTY";
+    }
+
+    public void deleteRetainedGameState(String gameId) {
+        String stateQueue = gameId + "_STATE";
+        try {
+            channel.queueDelete(stateQueue);
+        } catch (IOException e) {
+            System.err.println("Error during state queue deleting: " + e.getMessage());
+        }
     }
 }

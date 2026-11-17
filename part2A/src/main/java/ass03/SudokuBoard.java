@@ -81,6 +81,17 @@ public class SudokuBoard {
         return currentSelector == null || currentSelector.equals(localPlayerId);
     }
 
+    public boolean isComplete() {
+        for (int r = 0; r < GRID_SIZE; r++) {
+            for (int c = 0; c < GRID_SIZE; c++) {
+                if (grid[r][c] == 0) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
     public void setValue(int row, int col, int value, String playerId) {
         grid[row][col] = value;
         if (value == 0) {
