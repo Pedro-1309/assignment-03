@@ -1,26 +1,56 @@
 package ass03;
 
+import java.util.HashMap;
+import java.util.Map;
+
 public class SudokuBoard {
     private static final int GRID_SIZE = 9;
     private final int[][] grid = new int[GRID_SIZE][GRID_SIZE];
     private final String[][] selectedBy = new String[GRID_SIZE][GRID_SIZE];
-    private boolean[][] fixedCells = new boolean[GRID_SIZE][GRID_SIZE];
-    private String[][] insertedBy = new String[GRID_SIZE][GRID_SIZE];
-
-    public synchronized void setValue(int row, int col, int value) {
-        grid[row][col] = value;
-    }
+    private final boolean[][] fixedCells = new boolean[GRID_SIZE][GRID_SIZE];
+    private final String[][] insertedBy = new String[GRID_SIZE][GRID_SIZE];
+    private final Map<String, Integer>[][] cellClocks = new Map[GRID_SIZE][GRID_SIZE];
+    private final Map<String, Integer>[][] selectionClocks = new Map[GRID_SIZE][GRID_SIZE];
 
     public synchronized int getValue(int row, int col) {
         return grid[row][col];
     }
 
-    public synchronized void setSelection(int row, int col, String playerId) {
+    public synchronized boolean setSelection(int row, int col, String playerId, Map<String, Integer> msgClock) {
+        Map<String, Integer> currentClock = selectionClocks[row][col];
+        if (currentClock == null) currentClock = new HashMap<>();
+
+        RabbitMQManager.ClockComparison cmp = RabbitMQManager.compareClocks(msgClock, currentClock);
+
+        if (cmp == RabbitMQManager.ClockComparison.LESS) {
+            return false; // Outdated message
+        } else if (cmp == RabbitMQManager.ClockComparison.CONCURRENT) {
+            String currentSelector = selectedBy[row][col];
+            // Conflict resolution: the player with the "smaller" ID wins
+            if (currentSelector != null) {
+                if (playerId.compareTo(currentSelector) > 0) {
+                    return false;
+                }
+            }
+        }
+
         selectedBy[row][col] = playerId;
+        selectionClocks[row][col] = msgClock;
+        return true;
     }
 
     public synchronized void clearSelection(int row, int col) {
         selectedBy[row][col] = null;
+    }
+
+    public synchronized void clearSelectionsByPlayer(String playerId) {
+        for (int r = 0; r < GRID_SIZE; r++) {
+            for (int c = 0; c < GRID_SIZE; c++) {
+                if (playerId.equals(selectedBy[r][c])) {
+                    selectedBy[r][c] = null;
+                }
+            }
+        }
     }
 
     public synchronized String getSelectedBy(int row, int col) {
@@ -92,13 +122,36 @@ public class SudokuBoard {
         return true;
     }
 
-    public void setValue(int row, int col, int value, String playerId) {
+    public synchronized boolean setValue(int row, int col, int value, String playerId, Map<String, Integer> msgClock) {
+        Map<String, Integer> currentCellClock = cellClocks[row][col];
+        if (currentCellClock == null) currentCellClock = new HashMap<>();
+
+        RabbitMQManager.ClockComparison cmp = RabbitMQManager.compareClocks(msgClock, currentCellClock);
+        if (cmp == RabbitMQManager.ClockComparison.LESS) {
+            // Message is outdated, ignore it
+            return false;
+        }
+        else if (cmp == RabbitMQManager.ClockComparison.CONCURRENT) {
+            // Conflict detected
+            String currentAuthor = insertedBy[row][col];
+
+            // Tie-breaker
+            if (currentAuthor != null && !currentAuthor.equals("SYSTEM")) {
+                // ID comparison: the one with the "smaller" ID wins
+                if (playerId.compareTo(currentAuthor) > 0) {
+                    return false;
+                }
+            }
+        }
+
         grid[row][col] = value;
+        cellClocks[row][col] = msgClock;
         if (value == 0) {
             insertedBy[row][col] = null;
         } else {
             insertedBy[row][col] = playerId;
         }
+        return true;
     }
 
     public String getInsertedBy(int row, int col) {

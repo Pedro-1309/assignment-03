@@ -2,19 +2,15 @@ package ass03;
 
 import javax.swing.*;
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class Main {
     private static final AtomicInteger localSelectedRow = new AtomicInteger(-1);
     private static final AtomicInteger localSelectedCol = new AtomicInteger(-1);
-    private static final List<String> activePlayersList = new ArrayList<>();
+    private static final List<String> activePlayersList = new CopyOnWriteArrayList<>();
     private static String targetGameId = null;
     private static boolean isGameOver = false;
     private static final Map<String, Long> lastSeen = new ConcurrentHashMap<>();
@@ -180,7 +176,6 @@ public class Main {
 
                     activePlayersList.clear();
                     activePlayersList.add(localPlayerId);
-                    Main.targetGameId = null;
 
                     if (heartbeatExecutor != null && !heartbeatExecutor.isShutdown()) {
                         heartbeatExecutor.shutdown();
@@ -244,13 +239,22 @@ public class Main {
                 else if ("SELECT".equals(action)) {
                     int row = Integer.parseInt(parts[2]);
                     int col = Integer.parseInt(parts[3]);
+                    Map<String, Integer> msgClock = RabbitMQManager.parseClock(clockData);
 
-                    board.setSelection(row, col, senderId);
-                    view.updateCellSelection(row, col, senderId);
-                    try {
-                        networkManager.retainGameState(targetGameId, board.serializeState());
-                    } catch (IOException e) {
-                        e.printStackTrace();
+                    boolean accepted = board.setSelection(row, col, senderId, msgClock);
+                    if (accepted) {
+                        view.updateCellSelection(row, col, senderId);
+                        try {
+                            networkManager.retainGameState(targetGameId, board.serializeState());
+                        } catch (IOException e) {
+                            e.printStackTrace();
+                        }
+                    } else {
+                        if (senderId.equals(localPlayerId)) {
+                            localSelectedRow.set(-1);
+                            localSelectedCol.set(-1);
+                            view.appendLog("Selection in (" + row + "," + col + ") rejected: Concurrent conflict.");
+                        }
                     }
                 } else if ("DESELECT".equals(action)) {
                     int row = Integer.parseInt(parts[2]);
@@ -269,33 +273,41 @@ public class Main {
                     int row = Integer.parseInt(parts[2]);
                     int col = Integer.parseInt(parts[3]);
                     int value = Integer.parseInt(parts[4]);
-                    board.setValue(row, col, value, senderId);
-                    board.clearSelection(row, col);
+                    Map<String, Integer> msgClock = RabbitMQManager.parseClock(clockData);
 
-                    view.updateCellValue(row, col, value, senderId);
-                    view.clearCellSelection(row, col);
-                    if (value == 0) {
-                        view.appendLog(senderId + " cleared cell (" + row + "," + col + ")");
-                    } else {
-                        view.appendLog(senderId + " inserted " + value + " in cell (" + row + "," + col + ")");
-                    }
+                    boolean accepted = board.setValue(row, col, value, senderId, msgClock);
+                    if (accepted) {
+                        board.clearSelection(row, col);
 
-                    if (senderId.equals(localPlayerId)) {
-                        localSelectedRow.set(-1);
-                        localSelectedCol.set(-1);
-                        try {
-                            networkManager.retainGameState(targetGameId, board.serializeState());
-                        } catch (IOException e) {
-                            e.printStackTrace();
+                        view.updateCellValue(row, col, value, senderId);
+                        view.clearCellSelection(row, col);
+                        if (value == 0) {
+                            view.appendLog(senderId + " cleared cell (" + row + "," + col + ")");
+                        } else {
+                            view.appendLog(senderId + " inserted " + value + " in cell (" + row + "," + col + ")");
                         }
-                    }
 
-                    if (board.isComplete()) {
-                        isGameOver = true;
                         if (senderId.equals(localPlayerId)) {
-                            networkManager.publishGameOver();
-                            networkManager.deleteRetainedGameState(targetGameId);
-                            networkManager.publishGameInfo(targetGameId, -1);
+                            localSelectedRow.set(-1);
+                            localSelectedCol.set(-1);
+                            try {
+                                networkManager.retainGameState(targetGameId, board.serializeState());
+                            } catch (IOException e) {
+                                e.printStackTrace();
+                            }
+                        }
+
+                        if (board.isComplete()) {
+                            isGameOver = true;
+                            if (senderId.equals(localPlayerId)) {
+                                networkManager.publishGameOver();
+                                networkManager.deleteRetainedGameState(targetGameId);
+                                networkManager.publishGameInfo(targetGameId, -1);
+                            }
+                        }
+                    } else {
+                        if (senderId.equals(localPlayerId)) {
+                            view.appendLog("Move in (" + row + "," + col + ") rejected: Concurrent conflict.");
                         }
                     }
                 } else if ("PING".equals(action)) {
@@ -309,6 +321,10 @@ public class Main {
                             lastSeen.remove(senderId);
                             view.updateActivePlayers(activePlayersList);
                             view.appendLog(senderId + " disconnected.");
+
+                            // Remove any selections
+                            board.clearSelectionsByPlayer(senderId);
+                            view.clearSelectionsByPlayer(senderId);
 
                             // If the current leader left, elect a new one
                             if (amITheLeader(localPlayerId, activePlayersList)) {
@@ -347,7 +363,7 @@ public class Main {
                 long now = System.currentTimeMillis();
                 boolean listChanged = false;
 
-                for (String player : new ArrayList<>(activePlayersList)) {
+                for (String player : activePlayersList) {
                     if (player.equals(localPlayerId)) continue;
 
                     long lastTime = lastSeen.getOrDefault(player, now);
@@ -356,6 +372,8 @@ public class Main {
                         lastSeen.remove(player);
                         listChanged = true;
                         view.appendLog(player + " timed out (crashed).");
+                        board.clearSelectionsByPlayer(player);
+                        view.clearSelectionsByPlayer(player);
                     }
                 }
 

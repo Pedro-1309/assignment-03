@@ -5,7 +5,9 @@ import com.rabbitmq.client.*;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeoutException;
 
 public class RabbitMQManager {
@@ -18,6 +20,7 @@ public class RabbitMQManager {
     private String currentQueueName;
     private String currentGameExchange;
     private final Map<String, Integer> vectorClock = new HashMap<>();
+    public enum ClockComparison { LESS, GREATER, EQUAL, CONCURRENT }
 
     public interface MessageListener {
         void onMessageReceived(String message);
@@ -247,5 +250,49 @@ public class RabbitMQManager {
         } catch (IOException e) {
             System.err.println("Error during state queue deleting: " + e.getMessage());
         }
+    }
+
+    // Converts the string to a map representing the vector clock
+    public static Map<String, Integer> parseClock(String clockData) {
+        Map<String, Integer> clock = new HashMap<>();
+        if (clockData == null || clockData.isEmpty()) return clock;
+
+        String[] entries = clockData.split(",");
+        for (String entry : entries) {
+            String[] parts = entry.split(":");
+            if (parts.length == 2) {
+                clock.put(parts[0], Integer.parseInt(parts[1]));
+            }
+        }
+        return clock;
+    }
+
+    // Compares 2 Vector Clocks to determine cause-effect relation
+    public static ClockComparison compareClocks(Map<String, Integer> c1, Map<String, Integer> c2) {
+        boolean lessOrEqual = true;
+        boolean greaterOrEqual = true;
+        boolean equal = true;
+
+        Set<String> keys = new HashSet<>(c1.keySet());
+        keys.addAll(c2.keySet());
+
+        for (String key : keys) {
+            int v1 = c1.getOrDefault(key, 0);
+            int v2 = c2.getOrDefault(key, 0);
+
+            if (v1 < v2) {
+                greaterOrEqual = false;
+                equal = false;
+            } else if (v1 > v2) {
+                lessOrEqual = false;
+                equal = false;
+            }
+        }
+
+        if (equal) return ClockComparison.EQUAL;
+        if (lessOrEqual) return ClockComparison.LESS; // c1 happened before c2
+        if (greaterOrEqual) return ClockComparison.GREATER; // c2 happened before c1
+
+        return ClockComparison.CONCURRENT;
     }
 }
