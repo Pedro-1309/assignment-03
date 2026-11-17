@@ -156,6 +156,11 @@ public class RabbitMQManager {
         publishToExchange(currentGameExchange, message);
     }
 
+    public void publishPing() {
+        String message = String.format("PING|%s", playerId);
+        publishToExchange(currentGameExchange, message);
+    }
+
     private void publishToExchange(String exchangeName, String message) {
         if (channel != null && channel.isOpen()) {
             try {

@@ -6,6 +6,7 @@ import java.awt.event.KeyAdapter;
 import java.awt.event.KeyEvent;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Random;
 
 public class SudokuView extends JFrame {
 
@@ -200,10 +201,43 @@ public class SudokuView extends JFrame {
         if (playerId.equals(localPlayerId)) {
             return Color.CYAN; // Local player
         }
-        return playerColors.computeIfAbsent(playerId, id -> {
-            float hue = (Math.abs(id.hashCode()) % 360) / 360.0f;
-            return Color.getHSBColor(hue, 1.0f, 1.0f);
-        });
+        return playerColors.computeIfAbsent(playerId, id -> getDifferentColor(playerId));
+    }
+
+    private Color getDifferentColor(String playerId) {
+        Random rand = new Random();
+        Color newColor;
+        boolean tooSimilar;
+        int attempts = 0;
+
+        do {
+            tooSimilar = false;
+            float randomHue = rand.nextFloat();
+            newColor = Color.getHSBColor(randomHue, 1.0f, 1.0f);
+
+            if (getColorDistance(newColor, Color.CYAN) < 100) {
+                tooSimilar = true;
+            }
+
+            if (!tooSimilar) {
+                for (Color existingColor : playerColors.values()) {
+                    if (getColorDistance(newColor, existingColor) < 100) {
+                        tooSimilar = true;
+                        break;
+                    }
+                }
+            }
+            attempts++;
+        } while (tooSimilar && attempts < 100);
+
+        return newColor;
+    }
+
+    private double getColorDistance(Color c1, Color c2) {
+        int rDiff = c1.getRed() - c2.getRed();
+        int gDiff = c1.getGreen() - c2.getGreen();
+        int bDiff = c1.getBlue() - c2.getBlue();
+        return Math.sqrt(rDiff * rDiff + gDiff * gDiff + bDiff * bDiff);
     }
 
     public void updateActivePlayers(java.util.List<String> players) {

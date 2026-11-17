@@ -4,6 +4,11 @@ import javax.swing.*;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class Main {
@@ -12,6 +17,8 @@ public class Main {
     private static final List<String> activePlayersList = new ArrayList<>();
     private static String targetGameId = null;
     private static boolean isGameOver = false;
+    private static final Map<String, Long> lastSeen = new ConcurrentHashMap<>();
+    private static ScheduledExecutorService heartbeatExecutor;
 
     public static void main(String[] args) {
         String localPlayerId = "Player-" + (int) (Math.random() * 1000);
@@ -175,6 +182,11 @@ public class Main {
                     activePlayersList.add(localPlayerId);
                     Main.targetGameId = null;
 
+                    if (heartbeatExecutor != null && !heartbeatExecutor.isShutdown()) {
+                        heartbeatExecutor.shutdown();
+                    }
+                    lastSeen.clear();
+
                     try {
                         networkManager.leaveGame();
                         lobbyView.display();
@@ -286,10 +298,15 @@ public class Main {
                             networkManager.publishGameInfo(targetGameId, -1);
                         }
                     }
+                } else if ("PING".equals(action)) {
+                    if (!senderId.equals(localPlayerId)) {
+                        lastSeen.put(senderId, System.currentTimeMillis());
+                    }
                 } else if ("QUIT".equals(action)) {
                     if (!senderId.equals(localPlayerId)) {
                         if (activePlayersList.contains(senderId)) {
                             activePlayersList.remove(senderId);
+                            lastSeen.remove(senderId);
                             view.updateActivePlayers(activePlayersList);
                             view.appendLog(senderId + " disconnected.");
 
@@ -313,6 +330,42 @@ public class Main {
                     }
                 }
             }
+
+            heartbeatExecutor = Executors.newScheduledThreadPool(2);
+
+            // Publish PING every 3 seconds
+            heartbeatExecutor.scheduleAtFixedRate(() -> {
+                if (!isGameOver && targetGameId != null) {
+                    networkManager.publishPing();
+                }
+            }, 0, 3, TimeUnit.SECONDS);
+
+            // Check map every 5 seconds
+            heartbeatExecutor.scheduleAtFixedRate(() -> {
+                if (isGameOver || targetGameId == null) return;
+
+                long now = System.currentTimeMillis();
+                boolean listChanged = false;
+
+                for (String player : new ArrayList<>(activePlayersList)) {
+                    if (player.equals(localPlayerId)) continue;
+
+                    long lastTime = lastSeen.getOrDefault(player, now);
+                    if (now - lastTime > 10000) {
+                        activePlayersList.remove(player);
+                        lastSeen.remove(player);
+                        listChanged = true;
+                        view.appendLog(player + " timed out (crashed).");
+                    }
+                }
+
+                if (listChanged) {
+                    view.updateActivePlayers(activePlayersList);
+                    if (amITheLeader(localPlayerId, activePlayersList)) {
+                        networkManager.publishGameInfo(targetGameId, activePlayersList.size());
+                    }
+                }
+            }, 5, 5, TimeUnit.SECONDS);
 
             networkManager.publishJoin();
             view.display();
