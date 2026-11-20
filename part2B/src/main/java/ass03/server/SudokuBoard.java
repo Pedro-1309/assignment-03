@@ -46,6 +46,8 @@ public class SudokuBoard {
         } else {
             insertedBy[row][col] = playerId;
         }
+
+        selectedBy[row][col] = null;
         return true;
     }
 

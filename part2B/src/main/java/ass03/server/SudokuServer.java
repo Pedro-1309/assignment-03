@@ -7,8 +7,7 @@ import java.rmi.registry.Registry;
 public class SudokuServer {
     public static void main(String[] args) {
         try {
-            SudokuBoard board = new SudokuBoard();
-            SudokuService sudokuService = new SudokuServiceImpl(board);
+            SudokuService sudokuService = new SudokuServiceImpl();
 
             Registry registry = LocateRegistry.createRegistry(1099);
 

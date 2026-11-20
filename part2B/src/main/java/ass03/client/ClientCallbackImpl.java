@@ -3,6 +3,7 @@ package ass03.client;
 import ass03.common.ClientCallback;
 import java.rmi.RemoteException;
 import java.rmi.server.UnicastRemoteObject;
+import java.util.List;
 
 public class ClientCallbackImpl extends UnicastRemoteObject implements ClientCallback {
 
@@ -30,5 +31,13 @@ public class ClientCallbackImpl extends UnicastRemoteObject implements ClientCal
 
         String action = (value <= 0) ? " cleared cell " : " inserted " + value + " in ";
         view.appendLog(playerId + action + "(" + row + "," + col + ")");
+    }
+
+    @Override
+    public void onPlayersUpdated(List<String> activePlayers, String logMessage) throws RemoteException {
+        view.updateActivePlayers(activePlayers);
+        if (logMessage != null && !logMessage.isEmpty()) {
+            view.appendLog(logMessage);
+        }
     }
 }

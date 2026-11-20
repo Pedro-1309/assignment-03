@@ -2,6 +2,7 @@ package ass03.common;
 
 import java.rmi.Remote;
 import java.rmi.RemoteException;
+import java.util.List;
 
 // Remote interface exported by the client to receive push notifications from the server
 public interface ClientCallback extends Remote {
@@ -11,4 +12,6 @@ public interface ClientCallback extends Remote {
     void onCellDeselected(int row, int col) throws RemoteException;
 
     void onNumberInserted(int row, int col, int value, String playerId) throws RemoteException;
+
+    void onPlayersUpdated(List<String> activePlayers, String logMessage) throws RemoteException;
 }
