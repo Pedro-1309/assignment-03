@@ -7,7 +7,15 @@ public class SudokuBoard {
     private final String[][] insertedBy = new String[9][9];
 
     public SudokuBoard() {
-        // Load the default puzzle here (omitted for brevity)
+        int[][] randomBoard = SudokuGridGenerator.getRandomBoard();
+        for (int r = 0; r < 9; r++) {
+            for (int c = 0; c < 9; c++) {
+                grid[r][c] = randomBoard[r][c];
+                fixedCells[r][c] = grid[r][c] != 0;
+                selectedBy[r][c] = null;
+                insertedBy[r][c] = null;
+            }
+        }
     }
 
     // Uses locks (monitor) to prevent concurrent modifications
