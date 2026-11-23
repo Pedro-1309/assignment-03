@@ -1,6 +1,7 @@
 package ass03.server;
 
 import ass03.common.ClientCallback;
+import ass03.common.GameSnapshot;
 import ass03.common.LobbyCallback;
 import ass03.common.SudokuService;
 
@@ -45,21 +46,6 @@ public class SudokuServiceImpl extends UnicastRemoteObject implements SudokuServ
         }, 5, 5, TimeUnit.SECONDS);
     }
 
-    private void handlePlayerDisconnect(GameRoom room, String playerId) {
-        ClientCallback removed = room.getPlayers().remove(playerId);
-        if (removed == null) return;
-
-        System.out.println(playerId + " left " + room.getGameId());
-
-        List<int[]> clearedCells = room.getBoard().clearSelectionsByPlayer(playerId);
-        for (int[] cell : clearedCells) {
-            broadcastCellDeselected(room, cell[0], cell[1]);
-        }
-
-        broadcastActivePlayers(room, playerId + " left.");
-        broadcastLobbyUpdate(room.getGameId(), room.getPlayersCount());
-    }
-
     // --- Lobby ---
 
     @Override
@@ -95,15 +81,33 @@ public class SudokuServiceImpl extends UnicastRemoteObject implements SudokuServ
     // --- Game ---
 
     @Override
-    public void joinGame(String gameId, String playerId, ClientCallback callback) throws RemoteException {
+    public GameSnapshot joinGame(String gameId, String playerId, ClientCallback callback) throws RemoteException {
         GameRoom room = games.get(gameId);
-        if (room == null) return;
+        if (room == null) return null;
 
-        room.getPlayers().put(playerId, callback);
+        GameSnapshot snapshot;
+        int playersCount;
+
+        synchronized (room) {
+            room.getPlayers().put(playerId, callback);
+
+            String boardState = room.getBoard().serializeState();
+            List<String> activePlayers = new ArrayList<>(room.getPlayers().keySet());
+            snapshot = new GameSnapshot(boardState, activePlayers);
+            playersCount = room.getPlayersCount();
+
+            Map<String, ClientCallback> recipients = room.snapshotPlayers();
+            // Exclude the joining player from the join broadcast since they already receive the snapshot
+            recipients.remove(playerId);
+
+            room.enqueueNotification(() ->
+                    notifyPlayersUpdated(room, recipients, activePlayers, playerId + " joined the match.")
+            );
+        }
+
         System.out.println(playerId + " joined " + gameId);
-
-        broadcastActivePlayers(room, playerId + " joined the match.");
-        broadcastLobbyUpdate(gameId, room.getPlayersCount());
+        broadcastLobbyUpdate(gameId, playersCount);
+        return snapshot;
     }
 
     @Override
@@ -115,27 +119,26 @@ public class SudokuServiceImpl extends UnicastRemoteObject implements SudokuServ
     }
 
     @Override
-    public String getBoardState(String gameId) throws RemoteException {
-        GameRoom room = games.get(gameId);
-        return (room != null) ? room.getBoard().serializeState() : "EMPTY";
-    }
-
-    @Override
     public boolean selectCell(String gameId, int row, int col, String playerId) throws RemoteException {
         GameRoom room = games.get(gameId);
         if (room == null) return false;
 
-        boolean success = room.getBoard().setSelection(row, col, playerId);
-        if (success) {
-            for (Map.Entry<String, ClientCallback> entry : room.getPlayers().entrySet()) {
-                try {
-                    entry.getValue().onCellSelected(row, col, playerId);
-                } catch (RemoteException e) {
-                    handlePlayerDisconnect(room, entry.getKey());
+        synchronized (room) {
+            boolean success = room.getBoard().setSelection(row, col, playerId);
+            if (!success) return false;
+
+            Map<String, ClientCallback> recipients = room.snapshotPlayers();
+            room.enqueueNotification(() -> {
+                for (Map.Entry<String, ClientCallback> entry : recipients.entrySet()) {
+                    try {
+                        entry.getValue().onCellSelected(row, col, playerId);
+                    } catch (RemoteException e) {
+                        handlePlayerDisconnect(room, entry.getKey());
+                    }
                 }
-            }
+            });
+            return true;
         }
-        return success;
     }
 
     @Override
@@ -143,13 +146,19 @@ public class SudokuServiceImpl extends UnicastRemoteObject implements SudokuServ
         GameRoom room = games.get(gameId);
         if (room == null) return;
 
-        room.getBoard().clearSelection(row, col, playerId);
-        for (Map.Entry<String, ClientCallback> entry : room.getPlayers().entrySet()) {
-            try {
-                entry.getValue().onCellDeselected(row, col);
-            } catch (RemoteException e) {
-                handlePlayerDisconnect(room, entry.getKey());
-            }
+        synchronized (room) {
+            room.getBoard().clearSelection(row, col, playerId);
+
+            Map<String, ClientCallback> recipients = room.snapshotPlayers();
+            room.enqueueNotification(() -> {
+                for (Map.Entry<String, ClientCallback> entry : recipients.entrySet()) {
+                    try {
+                        entry.getValue().onCellDeselected(row, col);
+                    } catch (RemoteException e) {
+                        handlePlayerDisconnect(room, entry.getKey());
+                    }
+                }
+            });
         }
     }
 
@@ -158,36 +167,86 @@ public class SudokuServiceImpl extends UnicastRemoteObject implements SudokuServ
         GameRoom room = games.get(gameId);
         if (room == null) return false;
 
-        boolean success = room.getBoard().insertValue(row, col, value, playerId);
-        if (success) {
-            for (Map.Entry<String, ClientCallback> entry : room.getPlayers().entrySet()) {
-                try {
-                    entry.getValue().onNumberInserted(row, col, value, playerId);
+        boolean completed;
+        synchronized (room) {
+            boolean success = room.getBoard().insertValue(row, col, value, playerId);
+            if (!success) return false;
 
-                    if (room.getBoard().isComplete()) {
-                        for (Map.Entry<String, ClientCallback> e : room.getPlayers().entrySet()) {
-                            try {
-                                e.getValue().onGameCompleted();
-                            } catch (RemoteException ex) {
-                                System.err.println("Failed to notify " + e.getKey() + " on game completion");
-                            }
-                        }
-                        // Remove the completed room
-                        games.remove(gameId);
-                        for (Map.Entry<String, LobbyCallback> e : lobbyClients.entrySet()) {
-                            try {
-                                e.getValue().onGameRemoved(gameId);
-                            } catch (RemoteException ex) {
-                                lobbyClients.remove(e.getKey());
-                            }
+            completed = room.getBoard().isComplete();
+            Map<String, ClientCallback> recipients = room.snapshotPlayers();
+
+            // Move notification
+            room.enqueueNotification(() -> {
+                for (Map.Entry<String, ClientCallback> entry : recipients.entrySet()) {
+                    try {
+                        entry.getValue().onNumberInserted(row, col, value, playerId);
+                    } catch (RemoteException e) {
+                        handlePlayerDisconnect(room, entry.getKey());
+                    }
+                }
+            });
+
+            // Board completion
+            if (completed) {
+                room.enqueueNotification(() -> {
+                    for (Map.Entry<String, ClientCallback> entry : recipients.entrySet()) {
+                        try {
+                            entry.getValue().onGameCompleted();
+                        } catch (RemoteException e) {
+                            System.err.println("Failed to notify " + entry.getKey() + " on game completion");
+                            handlePlayerDisconnect(room, entry.getKey());
                         }
                     }
-                } catch (RemoteException e) {
-                    handlePlayerDisconnect(room, entry.getKey());
-                }
+                });
+                games.remove(gameId);
+                room.shutdown(); // Terminate after delivering the queued notifications
             }
         }
-        return success;
+
+        if (completed) {
+            broadcastLobbyRemoval(gameId);
+        }
+        return true;
+    }
+
+    private void handlePlayerDisconnect(GameRoom room, String playerId) {
+        int playersCount;
+        synchronized (room) {
+            ClientCallback removed = room.getPlayers().remove(playerId);
+            if (removed == null) return;
+
+            List<int[]> clearedCells = room.getBoard().clearSelectionsByPlayer(playerId);
+            List<String> activePlayers = new ArrayList<>(room.getPlayers().keySet());
+            Map<String, ClientCallback> recipients = room.snapshotPlayers();
+            playersCount = room.getPlayersCount();
+
+            room.enqueueNotification(() -> {
+                for (int[] cell : clearedCells) {
+                    for (Map.Entry<String, ClientCallback> entry : recipients.entrySet()) {
+                        try {
+                            entry.getValue().onCellDeselected(cell[0], cell[1]);
+                        } catch (RemoteException e) {
+                            handlePlayerDisconnect(room, entry.getKey());
+                        }
+                    }
+                }
+                notifyPlayersUpdated(room, recipients, activePlayers, playerId + " left.");
+            });
+        }
+
+        System.out.println(playerId + " left " + room.getGameId());
+        broadcastLobbyUpdate(room.getGameId(), playersCount);
+    }
+
+    private void notifyPlayersUpdated(GameRoom room, Map<String, ClientCallback> recipients,
+                                      List<String> activePlayers, String logMessage) {
+        for (Map.Entry<String, ClientCallback> entry : recipients.entrySet()) {
+            try {
+                entry.getValue().onPlayersUpdated(activePlayers, logMessage);
+            } catch (RemoteException e) {
+                handlePlayerDisconnect(room, entry.getKey());
+            }
+        }
     }
 
     private void broadcastLobbyUpdate(String gameId, int playersCount) {
@@ -196,6 +255,16 @@ public class SudokuServiceImpl extends UnicastRemoteObject implements SudokuServ
                 entry.getValue().onGameUpdated(gameId, playersCount);
             } catch (RemoteException e) {
                 // Remove unreachable lobby clients
+                lobbyClients.remove(entry.getKey());
+            }
+        }
+    }
+
+    private void broadcastLobbyRemoval(String gameId) {
+        for (Map.Entry<String, LobbyCallback> entry : lobbyClients.entrySet()) {
+            try {
+                entry.getValue().onGameRemoved(gameId);
+            } catch (RemoteException e) {
                 lobbyClients.remove(entry.getKey());
             }
         }

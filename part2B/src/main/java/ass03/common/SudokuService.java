@@ -16,11 +16,10 @@ public interface SudokuService extends Remote {
     String createGame() throws RemoteException;
 
     // --- Game operations ---
-    void joinGame(String gameId, String playerId, ClientCallback callback) throws RemoteException;
+    // Atomically joins the room and returns the consistent initial snapshot (board and players)
+    GameSnapshot joinGame(String gameId, String playerId, ClientCallback callback) throws RemoteException;
 
     void leaveGame(String gameId, String playerId) throws RemoteException;
-
-    String getBoardState(String gameId) throws RemoteException;
 
     boolean selectCell(String gameId, int row, int col, String playerId) throws RemoteException;
 

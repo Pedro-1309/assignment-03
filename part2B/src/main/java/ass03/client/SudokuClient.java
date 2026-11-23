@@ -1,6 +1,7 @@
 package ass03.client;
 
 import ass03.common.ClientCallback;
+import ass03.common.GameSnapshot;
 import ass03.common.LobbyCallback;
 import ass03.common.SudokuService;
 
@@ -156,14 +157,18 @@ public class SudokuClient {
                 }
             });
 
-            server.joinGame(gameId, localPlayerId, callback);
+            GameSnapshot snapshot = server.joinGame(gameId, localPlayerId, callback);
+            if (snapshot == null) {
+                // The room was already completed or removed just before joining
+                UnicastRemoteObject.unexportObject(callback, true);
+                lobbyView.display();
+                return;
+            }
 
-            String initialState = server.getBoardState(gameId);
-            parseAndLoadState(initialState, view);
-
+            parseAndLoadState(snapshot.getBoardState(), view);
+            view.updateActivePlayers(snapshot.getActivePlayers());
             view.appendLog("Joined " + gameId);
             view.display();
-
         } catch (Exception e) {
             e.printStackTrace();
             lobbyView.display();
