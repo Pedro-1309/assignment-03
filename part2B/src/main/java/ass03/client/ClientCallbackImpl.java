@@ -40,4 +40,9 @@ public class ClientCallbackImpl extends UnicastRemoteObject implements ClientCal
             view.appendLog(logMessage);
         }
     }
+
+    @Override
+    public void onGameCompleted() throws RemoteException {
+        view.showGameCompleteDialog();
+    }
 }

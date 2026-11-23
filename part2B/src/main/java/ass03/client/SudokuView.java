@@ -279,6 +279,17 @@ public class SudokuView extends JFrame {
         });
     }
 
+    public void showInvalidMoveDialog(String message) {
+        SwingUtilities.invokeLater(() -> {
+            JOptionPane.showMessageDialog(
+                    this,
+                    message,
+                    "Invalid Move",
+                    JOptionPane.WARNING_MESSAGE
+            );
+        });
+    }
+
     public void appendLog(String message) {
         SwingUtilities.invokeLater(() -> {
             logArea.append(message + "\n");

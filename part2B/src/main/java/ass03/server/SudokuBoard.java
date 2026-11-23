@@ -13,9 +13,58 @@ public class SudokuBoard {
                 grid[r][c] = randomBoard[r][c];
                 fixedCells[r][c] = grid[r][c] != 0;
                 selectedBy[r][c] = null;
-                insertedBy[r][c] = null;
+                insertedBy[r][c] = "SYSTEM";
             }
         }
+    }
+
+    public synchronized boolean isValidMove(int row, int col, int value) {
+        if (fixedCells[row][col]) return false;
+
+        if (value == 0) return true;
+
+        if (value < 1 || value > 9) return false;
+
+        // Check row and column
+        for (int i = 0; i < 9; i++) {
+            if (grid[row][i] == value && i != col) return false;
+            if (grid[i][col] == value && i != row) return false;
+        }
+
+        // Check 3x3 subgrid
+        int startR = (row / 3) * 3;
+        int startC = (col / 3) * 3;
+        for (int r = startR; r < startR + 3; r++) {
+            for (int c = startC; c < startC + 3; c++) {
+                if (grid[r][c] == value && (r != row || c != col)) return false;
+            }
+        }
+        return true;
+    }
+
+    public synchronized boolean insertValue(int row, int col, int value, String playerId) {
+        if (!playerId.equals(selectedBy[row][col])) return false;
+
+        if (!isValidMove(row, col, value)) return false;
+
+        grid[row][col] = value;
+        if (value == 0) {
+            insertedBy[row][col] = null;
+        } else {
+            insertedBy[row][col] = playerId;
+        }
+        // Release the selection lock
+        selectedBy[row][col] = null;
+        return true;
+    }
+
+    public synchronized boolean isComplete() {
+        for (int r = 0; r < 9; r++) {
+            for (int c = 0; c < 9; c++) {
+                if (grid[r][c] == 0) return false;
+            }
+        }
+        return true;
     }
 
     // Uses locks (monitor) to prevent concurrent modifications
@@ -43,20 +92,6 @@ public class SudokuBoard {
                 }
             }
         }
-    }
-
-    public synchronized boolean insertValue(int row, int col, int value, String playerId) {
-        if (!playerId.equals(selectedBy[row][col])) return false;
-
-        grid[row][col] = value;
-        if (value == 0) {
-            insertedBy[row][col] = null;
-        } else {
-            insertedBy[row][col] = playerId;
-        }
-
-        selectedBy[row][col] = null;
-        return true;
     }
 
     public synchronized String serializeState() {

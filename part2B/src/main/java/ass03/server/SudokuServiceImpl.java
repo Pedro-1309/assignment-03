@@ -132,6 +132,25 @@ public class SudokuServiceImpl extends UnicastRemoteObject implements SudokuServ
             for (Map.Entry<String, ClientCallback> entry : room.getPlayers().entrySet()) {
                 try {
                     entry.getValue().onNumberInserted(row, col, value, playerId);
+
+                    if (room.getBoard().isComplete()) {
+                        for (Map.Entry<String, ClientCallback> e : room.getPlayers().entrySet()) {
+                            try {
+                                e.getValue().onGameCompleted();
+                            } catch (RemoteException ex) {
+                                System.err.println("Failed to notify " + e.getKey() + " on game completion");
+                            }
+                        }
+                        // Remove the completed room
+                        games.remove(gameId);
+                        for (Map.Entry<String, LobbyCallback> e : lobbyClients.entrySet()) {
+                            try {
+                                e.getValue().onGameRemoved(gameId);
+                            } catch (RemoteException ex) {
+                                lobbyClients.remove(e.getKey());
+                            }
+                        }
+                    }
                 } catch (RemoteException e) {
                     System.err.println("Failed to notify " + entry.getKey() + " on insertNumber");
                 }

@@ -81,7 +81,7 @@ public class SudokuClient {
                             localSelectedRow.set(row);
                             localSelectedCol.set(col);
                         } else {
-                            view.appendLog("Cannot select cell (" + row + "," + col + ").");
+                            System.out.println("Cannot select cell (" + row + "," + col + ").");
                         }
                     } catch (Exception ex) {
                         ex.printStackTrace();
@@ -96,9 +96,11 @@ public class SudokuClient {
                             if (success) {
                                 localSelectedRow.set(-1);
                                 localSelectedCol.set(-1);
+                            } else {
+                                view.showInvalidMoveDialog("Invalid number (" + value + ") for this row, column, or 3x3 grid.");
                             }
                         } else {
-                            view.appendLog("You must select the cell before inserting a number.");
+                            System.out.println("You must select the cell before inserting a number.");
                         }
                     } catch (Exception ex) {
                         ex.printStackTrace();
