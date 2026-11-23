@@ -2,6 +2,8 @@ package ass03.client;
 
 import javax.swing.*;
 import java.awt.*;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
 
 public class LobbyView extends JFrame {
 
@@ -13,13 +15,25 @@ public class LobbyView extends JFrame {
     public interface LobbyActionListener {
         void onJoinGame(String gameId);
         void onCreateNewGame();
+        void onExit();
     }
 
     public LobbyView() {
         setTitle("Cooperative Sudoku - Lobby");
         setSize(400, 300);
-        setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
         setLayout(new BorderLayout());
+
+        addWindowListener(new WindowAdapter() {
+            @Override
+            public void windowClosing(WindowEvent e) {
+                if (listener != null) {
+                    listener.onExit();
+                } else {
+                    System.exit(0);
+                }
+            }
+        });
 
         gamesModel = new DefaultListModel<>();
         gamesList = new JList<>(gamesModel);

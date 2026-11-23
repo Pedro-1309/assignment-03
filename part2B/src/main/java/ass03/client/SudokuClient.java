@@ -6,7 +6,9 @@ import ass03.common.SudokuService;
 
 import java.rmi.registry.LocateRegistry;
 import java.rmi.registry.Registry;
+import java.rmi.server.UnicastRemoteObject;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class SudokuClient {
@@ -24,6 +26,23 @@ public class SudokuClient {
 
             LobbyCallback lobbyCallback = new LobbyCallbackImpl(lobbyView);
             server.registerLobbyCallback(localPlayerId, lobbyCallback);
+
+            // Cleanup routine to unregister and unexport the lobby callback once
+            AtomicBoolean isCleanedUp = new AtomicBoolean(false);
+            Runnable cleanupLobby = () -> {
+                if (isCleanedUp.compareAndSet(false, true)) {
+                    try {
+                        server.unregisterLobbyCallback(localPlayerId);
+                    } catch (Exception ex) {
+                        System.err.println("Server unreachable during lobby unregister.");
+                    }
+                    try {
+                        UnicastRemoteObject.unexportObject(lobbyCallback, true);
+                    } catch (Exception ignored) {}
+                }
+            };
+            // Safety net for JVM shutdowns
+            Runtime.getRuntime().addShutdownHook(new Thread(cleanupLobby));
 
             Map<String, Integer> activeGames = server.getActiveGames();
             for (Map.Entry<String, Integer> entry : activeGames.entrySet()) {
@@ -47,6 +66,15 @@ public class SudokuClient {
                         ex.printStackTrace();
                     }
                 }
+
+                @Override
+                public void onExit() {
+                    new Thread(() -> {
+                        cleanupLobby.run();
+                        System.exit(0);
+                    }).start();
+                }
+
             });
 
             lobbyView.display();
@@ -117,8 +145,12 @@ public class SudokuClient {
                         }
                         server.leaveGame(gameId, localPlayerId);
                     } catch (Exception ex) {
-                        ex.printStackTrace();
+                        System.err.println("Server unreachable while leaving game.");
                     } finally {
+                        try {
+                            // Cleanly unexport the game callback stub
+                            UnicastRemoteObject.unexportObject(callback, true);
+                        } catch (Exception ignored) {}
                         lobbyView.display();
                     }
                 }

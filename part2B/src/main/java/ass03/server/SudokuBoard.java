@@ -1,5 +1,8 @@
 package ass03.server;
 
+import java.util.ArrayList;
+import java.util.List;
+
 public class SudokuBoard {
     private final int[][] grid = new int[9][9];
     private final boolean[][] fixedCells = new boolean[9][9];
@@ -84,14 +87,17 @@ public class SudokuBoard {
         }
     }
 
-    public synchronized void clearSelectionsByPlayer(String playerId) {
+    public synchronized List<int[]> clearSelectionsByPlayer(String playerId) {
+        List<int[]> clearedCells = new ArrayList<>();
         for (int r = 0; r < 9; r++) {
             for (int c = 0; c < 9; c++) {
                 if (playerId.equals(selectedBy[r][c])) {
                     selectedBy[r][c] = null;
+                    clearedCells.add(new int[]{r, c});
                 }
             }
         }
+        return clearedCells;
     }
 
     public synchronized String serializeState() {

@@ -11,6 +11,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class SudokuServiceImpl extends UnicastRemoteObject implements SudokuService {
@@ -18,9 +21,43 @@ public class SudokuServiceImpl extends UnicastRemoteObject implements SudokuServ
     private final Map<String, GameRoom> games = new ConcurrentHashMap<>();
     private final Map<String, LobbyCallback> lobbyClients = new ConcurrentHashMap<>();
     private final AtomicInteger gameCounter = new AtomicInteger(1);
+    private final ScheduledExecutorService heartbeatExecutor = Executors.newScheduledThreadPool(1);
 
     public SudokuServiceImpl() throws RemoteException {
         super();
+        startFailureDetector();
+    }
+
+    // Pings all connected clients to detect crashes
+    private void startFailureDetector() {
+        heartbeatExecutor.scheduleAtFixedRate(() -> {
+            for (GameRoom room : games.values()) {
+                for (Map.Entry<String, ClientCallback> entry : room.getPlayers().entrySet()) {
+                    String playerId = entry.getKey();
+                    try {
+                        entry.getValue().ping();
+                    } catch (RemoteException e) {
+                        System.err.println("Heartbeat failed for " + playerId + " in " + room.getGameId());
+                        handlePlayerDisconnect(room, playerId);
+                    }
+                }
+            }
+        }, 5, 5, TimeUnit.SECONDS);
+    }
+
+    private void handlePlayerDisconnect(GameRoom room, String playerId) {
+        ClientCallback removed = room.getPlayers().remove(playerId);
+        if (removed == null) return;
+
+        System.out.println(playerId + " left " + room.getGameId());
+
+        List<int[]> clearedCells = room.getBoard().clearSelectionsByPlayer(playerId);
+        for (int[] cell : clearedCells) {
+            broadcastCellDeselected(room, cell[0], cell[1]);
+        }
+
+        broadcastActivePlayers(room, playerId + " left.");
+        broadcastLobbyUpdate(room.getGameId(), room.getPlayersCount());
     }
 
     // --- Lobby ---
@@ -72,15 +109,9 @@ public class SudokuServiceImpl extends UnicastRemoteObject implements SudokuServ
     @Override
     public void leaveGame(String gameId, String playerId) throws RemoteException {
         GameRoom room = games.get(gameId);
-        if (room == null) return;
-
-        room.getPlayers().remove(playerId);
-        room.getBoard().clearSelectionsByPlayer(playerId);
-        System.out.println(playerId + " left " + gameId);
-
-        broadcastActivePlayers(room, playerId + " left the match.");
-        // Keep the room alive even if playersCount drops to 0
-        broadcastLobbyUpdate(gameId, room.getPlayersCount());
+        if (room != null) {
+            handlePlayerDisconnect(room, playerId);
+        }
     }
 
     @Override
@@ -100,7 +131,7 @@ public class SudokuServiceImpl extends UnicastRemoteObject implements SudokuServ
                 try {
                     entry.getValue().onCellSelected(row, col, playerId);
                 } catch (RemoteException e) {
-                    System.err.println("Failed to notify " + entry.getKey() + " on selectCell");
+                    handlePlayerDisconnect(room, entry.getKey());
                 }
             }
         }
@@ -117,7 +148,7 @@ public class SudokuServiceImpl extends UnicastRemoteObject implements SudokuServ
             try {
                 entry.getValue().onCellDeselected(row, col);
             } catch (RemoteException e) {
-                System.err.println("Failed to notify " + entry.getKey() + " on deselectCell");
+                handlePlayerDisconnect(room, entry.getKey());
             }
         }
     }
@@ -152,7 +183,7 @@ public class SudokuServiceImpl extends UnicastRemoteObject implements SudokuServ
                         }
                     }
                 } catch (RemoteException e) {
-                    System.err.println("Failed to notify " + entry.getKey() + " on insertNumber");
+                    handlePlayerDisconnect(room, entry.getKey());
                 }
             }
         }
@@ -178,7 +209,17 @@ public class SudokuServiceImpl extends UnicastRemoteObject implements SudokuServ
             try {
                 entry.getValue().onPlayersUpdated(activePlayers, logMessage);
             } catch (RemoteException e) {
-                System.err.println("Failed to update players list for " + entry.getKey());
+                handlePlayerDisconnect(room, entry.getKey());
+            }
+        }
+    }
+
+    private void broadcastCellDeselected(GameRoom room, int row, int col) {
+        for (Map.Entry<String, ClientCallback> entry : room.getPlayers().entrySet()) {
+            try {
+                entry.getValue().onCellDeselected(row, col);
+            } catch (RemoteException e) {
+                handlePlayerDisconnect(room, entry.getKey());
             }
         }
     }

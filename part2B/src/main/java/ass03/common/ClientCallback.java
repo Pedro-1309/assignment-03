@@ -16,4 +16,6 @@ public interface ClientCallback extends Remote {
     void onPlayersUpdated(List<String> activePlayers, String logMessage) throws RemoteException;
 
     void onGameCompleted() throws RemoteException;
+
+    void ping() throws RemoteException;
 }

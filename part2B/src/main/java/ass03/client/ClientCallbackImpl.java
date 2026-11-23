@@ -45,4 +45,9 @@ public class ClientCallbackImpl extends UnicastRemoteObject implements ClientCal
     public void onGameCompleted() throws RemoteException {
         view.showGameCompleteDialog();
     }
+
+    @Override
+    public void ping() throws RemoteException {
+        // No operation needed: if this remote call succeeds, the client is still alive
+    }
 }
