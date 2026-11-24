@@ -72,7 +72,7 @@ public class LobbyView extends JFrame {
         this.listener = listener;
     }
 
-    // Called from the RabbitMQ network thread: use invokeLater to update the List safely
+    // Called from the RMI callback thread: use invokeLater to update the List safely
     public void addAvailableGame(String gameId, int playersCount) {
         SwingUtilities.invokeLater(() -> {
             String displayString = gameId + " (" + playersCount + " players)";
@@ -80,7 +80,7 @@ public class LobbyView extends JFrame {
             // Check if the game already exists
             for (int i = 0; i < gamesModel.size(); i++) {
                 String item = gamesModel.getElementAt(i);
-                if (item.startsWith(gameId)) {
+                if (item.startsWith(gameId + " ")) {
                     if (!item.equals(displayString)) {
                         // Same id, different number of players: update the view
                         gamesModel.set(i, displayString);
@@ -97,7 +97,7 @@ public class LobbyView extends JFrame {
         SwingUtilities.invokeLater(() -> {
             for (int i = 0; i < gamesModel.size(); i++) {
                 String item = gamesModel.getElementAt(i);
-                if (item.startsWith(gameId)) {
+                if (item.startsWith(gameId + " ")) {
                     gamesModel.remove(i);
                     break;
                 }

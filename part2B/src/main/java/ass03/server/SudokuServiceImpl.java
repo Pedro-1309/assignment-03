@@ -89,6 +89,7 @@ public class SudokuServiceImpl extends UnicastRemoteObject implements SudokuServ
         int playersCount;
 
         synchronized (room) {
+            if (games.get(gameId) != room) return null;
             room.getPlayers().put(playerId, callback);
 
             String boardState = room.getBoard().serializeState();
@@ -194,7 +195,6 @@ public class SudokuServiceImpl extends UnicastRemoteObject implements SudokuServ
                             entry.getValue().onGameCompleted();
                         } catch (RemoteException e) {
                             System.err.println("Failed to notify " + entry.getKey() + " on game completion");
-                            handlePlayerDisconnect(room, entry.getKey());
                         }
                     }
                 });
@@ -235,7 +235,9 @@ public class SudokuServiceImpl extends UnicastRemoteObject implements SudokuServ
         }
 
         System.out.println(playerId + " left " + room.getGameId());
-        broadcastLobbyUpdate(room.getGameId(), playersCount);
+        if (games.containsKey(room.getGameId())) {
+            broadcastLobbyUpdate(room.getGameId(), playersCount);
+        }
     }
 
     private void notifyPlayersUpdated(GameRoom room, Map<String, ClientCallback> recipients,
@@ -266,29 +268,6 @@ public class SudokuServiceImpl extends UnicastRemoteObject implements SudokuServ
                 entry.getValue().onGameRemoved(gameId);
             } catch (RemoteException e) {
                 lobbyClients.remove(entry.getKey());
-            }
-        }
-    }
-
-    // Wrap in a serializable ArrayList for RMI transport
-    private void broadcastActivePlayers(GameRoom room, String logMessage) {
-        List<String> activePlayers = new ArrayList<>(room.getPlayers().keySet());
-
-        for (Map.Entry<String, ClientCallback> entry : room.getPlayers().entrySet()) {
-            try {
-                entry.getValue().onPlayersUpdated(activePlayers, logMessage);
-            } catch (RemoteException e) {
-                handlePlayerDisconnect(room, entry.getKey());
-            }
-        }
-    }
-
-    private void broadcastCellDeselected(GameRoom room, int row, int col) {
-        for (Map.Entry<String, ClientCallback> entry : room.getPlayers().entrySet()) {
-            try {
-                entry.getValue().onCellDeselected(row, col);
-            } catch (RemoteException e) {
-                handlePlayerDisconnect(room, entry.getKey());
             }
         }
     }

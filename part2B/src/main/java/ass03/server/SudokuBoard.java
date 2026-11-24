@@ -16,7 +16,7 @@ public class SudokuBoard {
                 grid[r][c] = randomBoard[r][c];
                 fixedCells[r][c] = grid[r][c] != 0;
                 selectedBy[r][c] = null;
-                insertedBy[r][c] = "SYSTEM";
+                insertedBy[r][c] = fixedCells[r][c] ? "SYSTEM" : null;
             }
         }
     }

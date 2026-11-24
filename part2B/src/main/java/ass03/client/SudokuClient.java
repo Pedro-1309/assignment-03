@@ -9,6 +9,8 @@ import java.rmi.registry.LocateRegistry;
 import java.rmi.registry.Registry;
 import java.rmi.server.UnicastRemoteObject;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -16,13 +18,15 @@ public class SudokuClient {
 
     private static final AtomicInteger localSelectedRow = new AtomicInteger(-1);
     private static final AtomicInteger localSelectedCol = new AtomicInteger(-1);
+    private static final ExecutorService rmiExecutor = Executors.newSingleThreadExecutor();
 
     public static void main(String[] args) {
+        String host = (args.length > 0) ? args[0] : "localhost";
         String localPlayerId = "Player-" + (int) (Math.random() * 1000);
         LobbyView lobbyView = new LobbyView();
 
         try {
-            Registry registry = LocateRegistry.getRegistry("localhost", 1099);
+            Registry registry = LocateRegistry.getRegistry(host, 1099);
             SudokuService server = (SudokuService) registry.lookup("SudokuService");
 
             LobbyCallback lobbyCallback = new LobbyCallbackImpl(lobbyView);
@@ -40,6 +44,7 @@ public class SudokuClient {
                     try {
                         UnicastRemoteObject.unexportObject(lobbyCallback, true);
                     } catch (Exception ignored) {}
+                    rmiExecutor.shutdown();
                 }
             };
             // Safety net for JVM shutdowns
@@ -54,26 +59,28 @@ public class SudokuClient {
                 @Override
                 public void onJoinGame(String gameId) {
                     lobbyView.hideView();
-                    startGame(gameId, localPlayerId, server, lobbyView);
+                    rmiExecutor.execute(() -> startGame(gameId, localPlayerId, server, lobbyView));
                 }
 
                 @Override
                 public void onCreateNewGame() {
-                    try {
-                        String newGameId = server.createGame();
-                        lobbyView.hideView();
-                        startGame(newGameId, localPlayerId, server, lobbyView);
-                    } catch (Exception ex) {
-                        ex.printStackTrace();
-                    }
+                    rmiExecutor.execute(() -> {
+                        try {
+                            String newGameId = server.createGame();
+                            lobbyView.hideView();
+                            startGame(newGameId, localPlayerId, server, lobbyView);
+                        } catch (Exception ex) {
+                            ex.printStackTrace();
+                        }
+                    });
                 }
 
                 @Override
                 public void onExit() {
-                    new Thread(() -> {
+                    rmiExecutor.execute(() -> {
                         cleanupLobby.run();
                         System.exit(0);
-                    }).start();
+                    });
                 }
 
             });
@@ -83,6 +90,7 @@ public class SudokuClient {
         } catch (Exception e) {
             System.err.println("Failed to connect to the RMI Server.");
             e.printStackTrace();
+            rmiExecutor.shutdown();
         }
     }
 
@@ -97,63 +105,65 @@ public class SudokuClient {
             view.setListener(new SudokuView.SudokuActionListener() {
                 @Override
                 public void onCellSelected(int row, int col) {
-                    try {
-                        int currentRow = localSelectedRow.get();
-                        int currentCol = localSelectedCol.get();
+                    rmiExecutor.execute(() -> {
+                        try {
+                            int currentRow = localSelectedRow.get();
+                            int currentCol = localSelectedCol.get();
 
-                        if (currentRow != -1 && currentCol != -1 && (currentRow != row || currentCol != col)) {
-                            server.deselectCell(gameId, currentRow, currentCol, localPlayerId);
-                        }
+                            if (currentRow != -1 && currentCol != -1 && (currentRow != row || currentCol != col)) {
+                                server.deselectCell(gameId, currentRow, currentCol, localPlayerId);
+                            }
 
-                        boolean success = server.selectCell(gameId, row, col, localPlayerId);
-                        if (success) {
-                            localSelectedRow.set(row);
-                            localSelectedCol.set(col);
-                        } else {
-                            System.out.println("Cannot select cell (" + row + "," + col + ").");
+                            boolean success = server.selectCell(gameId, row, col, localPlayerId);
+                            if (success) {
+                                localSelectedRow.set(row);
+                                localSelectedCol.set(col);
+                            } else {
+                                System.out.println("Cannot select cell (" + row + "," + col + ").");
+                            }
+                        } catch (Exception ex) {
+                            ex.printStackTrace();
                         }
-                    } catch (Exception ex) {
-                        ex.printStackTrace();
-                    }
+                    });
                 }
 
                 @Override
                 public void onNumberInserted(int row, int col, int value) {
-                    try {
-                        if (localSelectedRow.get() == row && localSelectedCol.get() == col) {
-                            boolean success = server.insertNumber(gameId, row, col, value, localPlayerId);
-                            if (success) {
-                                localSelectedRow.set(-1);
-                                localSelectedCol.set(-1);
+                    rmiExecutor.execute(() -> {
+                        try {
+                            if (localSelectedRow.get() == row && localSelectedCol.get() == col) {
+                                boolean success = server.insertNumber(gameId, row, col, value, localPlayerId);
+                                if (success) {
+                                    localSelectedRow.set(-1);
+                                    localSelectedCol.set(-1);
+                                } else {
+                                    view.showInvalidMoveDialog("Invalid number (" + value + ") for this row, column, or 3x3 grid.");
+                                }
                             } else {
-                                view.showInvalidMoveDialog("Invalid number (" + value + ") for this row, column, or 3x3 grid.");
+                                System.out.println("You must select the cell before inserting a number.");
                             }
-                        } else {
-                            System.out.println("You must select the cell before inserting a number.");
+                        } catch (Exception ex) {
+                            ex.printStackTrace();
                         }
-                    } catch (Exception ex) {
-                        ex.printStackTrace();
-                    }
+                    });
                 }
 
                 @Override
                 public void onQuit() {
-                    try {
-                        int currentRow = localSelectedRow.get();
-                        int currentCol = localSelectedCol.get();
-                        if (currentRow != -1 && currentCol != -1) {
-                            server.deselectCell(gameId, currentRow, currentCol, localPlayerId);
-                        }
-                        server.leaveGame(gameId, localPlayerId);
-                    } catch (Exception ex) {
-                        System.err.println("Server unreachable while leaving game.");
-                    } finally {
+                    rmiExecutor.execute(() -> {
                         try {
-                            // Cleanly unexport the game callback stub
-                            UnicastRemoteObject.unexportObject(callback, true);
-                        } catch (Exception ignored) {}
-                        lobbyView.display();
-                    }
+                            server.leaveGame(gameId, localPlayerId);
+                        } catch (Exception ex) {
+                            System.err.println("Server unreachable while leaving game.");
+                        } finally {
+                            try {
+                                // Cleanly unexport the game callback stub
+                                UnicastRemoteObject.unexportObject(callback, true);
+                            } catch (Exception ignored) {
+                            }
+                            lobbyView.display();
+                        }
+                    });
                 }
             });
 
@@ -190,7 +200,7 @@ public class SudokuClient {
                 int c = Integer.parseInt(parts[1]);
                 int val = Integer.parseInt(parts[2]);
                 String sel = parts[3];
-                // boolean isFixed = Boolean.parseBoolean(parts[4]); // Available if the View needs it
+                // boolean isFixed = Boolean.parseBoolean(parts[4]);
                 String inserter = parts[5];
 
                 if (val != 0) {

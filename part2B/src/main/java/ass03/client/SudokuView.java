@@ -193,19 +193,6 @@ public class SudokuView extends JFrame {
         SwingUtilities.invokeLater(() -> cells[row][col].setBackground(Color.WHITE));
     }
 
-    public void clearSelectionsByPlayer(String disconnectedPlayerId) {
-        SwingUtilities.invokeLater(() -> {
-            Color targetColor = getPlayerColor(disconnectedPlayerId);
-            for (int r = 0; r < GRID_SIZE; r++) {
-                for (int c = 0; c < GRID_SIZE; c++) {
-                    if (targetColor.equals(cells[r][c].getBackground())) {
-                        cells[r][c].setBackground(Color.WHITE);
-                    }
-                }
-            }
-        });
-    }
-
     public void display() {
         SwingUtilities.invokeLater(() -> setVisible(true));
     }

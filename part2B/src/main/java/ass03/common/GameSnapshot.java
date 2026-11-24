@@ -4,7 +4,7 @@ import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.List;
 
-// Immutable object returned atomically to avoid race conditions
+// Object returned atomically to avoid race conditions
 public class GameSnapshot implements Serializable {
     private static final long serialVersionUID = 1L;
 
