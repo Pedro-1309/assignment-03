@@ -1,32 +1,34 @@
 package ass03.network;
 
+import ass03.model.VectorClock;
 import com.rabbitmq.client.*;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.TimeoutException;
 
 public class RabbitMQManager {
 
     private static final String LOBBY_EXCHANGE = "sudoku_lobby";
 
+    private final String playerId;
+    private final VectorClock vectorClock;
+    private final Object channelLock = new Object();
+
     private Connection connection;
     private Channel channel;
-    private final String playerId;
-    private String currentQueueName;
+
+    private String lobbyQueueName;
+    private String lobbyConsumerTag;
     private String currentGameExchange;
-    private final Map<String, Integer> vectorClock = new HashMap<>();
-    public enum ClockComparison { LESS, GREATER, EQUAL, CONCURRENT }
+    private String gameQueueName;
+    private String gameConsumerTag;
 
     public interface MessageListener {
         void onMessageReceived(String message);
     }
 
-    // Listener interface to pass Lobby events to the Controller
     public interface LobbyListener {
         void onListGamesRequest(String requesterId);
         void onGameInfoReceived(String gameId, int playersCount);
@@ -34,138 +36,192 @@ public class RabbitMQManager {
 
     public RabbitMQManager(String playerId) {
         this.playerId = playerId;
-        this.vectorClock.put(playerId, 0);
+        this.vectorClock = new VectorClock(playerId);
     }
 
     public void connect(String host) throws IOException, TimeoutException {
         ConnectionFactory factory = new ConnectionFactory();
         factory.setHost(host);
-        this.connection = factory.newConnection();
-        this.channel = connection.createChannel();
-    }
-
-    public void disconnect() throws IOException, TimeoutException {
-        if (channel != null && channel.isOpen()) {
-            channel.close();
+        synchronized (channelLock) {
+            this.connection = factory.newConnection();
+            this.channel = connection.createChannel();
         }
-        if (connection != null && connection.isOpen()) {
-            connection.close();
+    }
+
+    public void disconnect() {
+        synchronized (channelLock) {
+            try {
+                leaveGame();
+                if (channel != null && channel.isOpen()) {
+                    if (lobbyConsumerTag != null) {
+                        channel.basicCancel(lobbyConsumerTag);
+                        lobbyConsumerTag = null;
+                    }
+                    if (lobbyQueueName != null) {
+                        channel.queueDelete(lobbyQueueName);
+                        lobbyQueueName = null;
+                    }
+                    channel.close();
+                }
+                if (connection != null && connection.isOpen()) {
+                    connection.close();
+                }
+                System.out.println(" [" + playerId + "] Disconnected from RabbitMQ.");
+            } catch (IOException | TimeoutException e) {
+                System.err.println(" [" + playerId + "] Error during disconnect: " + e.getMessage());
+            }
         }
-        System.out.println(" [" + playerId + "] Disconnected from RabbitMQ.");
     }
 
-    // --- GAME PHASE (Sudoku) ---
-    public void joinGame(String gameId, MessageListener listener) throws IOException {
-        this.currentGameExchange = gameId;
-        channel.exchangeDeclare(currentGameExchange, "fanout");
-        currentQueueName = channel.queueDeclare().getQueue();
-        channel.queueBind(currentQueueName, currentGameExchange, "");
-
-        DeliverCallback deliverCallback = (consumerTag, delivery) -> {
-            String message = new String(delivery.getBody(), StandardCharsets.UTF_8);
-            listener.onMessageReceived(message);
-        };
-
-        channel.basicConsume(currentQueueName, true, deliverCallback, consumerTag -> { });
-        System.out.println(" [" + playerId + "] Joined game: " + currentGameExchange);
+    public void updateClock(String receivedClockData) {
+        vectorClock.update(receivedClockData);
     }
 
-    public void leaveGame() throws IOException, TimeoutException {
-        if (currentQueueName != null && channel != null && channel.isOpen()) {
-            channel.queueUnbind(currentQueueName, currentGameExchange, "");
-            channel.queuePurge(currentQueueName); // Clear any remaining messages in queue
-            System.out.println(" [" + playerId + "] Left the game exchange: " + currentGameExchange);
-        }
-        currentGameExchange = null;
-    }
-    public void publishCellSelection(int row, int col) {
-        incrementLocalClock();
-        String message = String.format("SELECT|%s|%d|%d|%s", playerId, row, col, serializeClock());
-        publishToExchange(currentGameExchange, message);
+    public void resetClock() {
+        vectorClock.reset(playerId);
     }
 
-    public void publishCellDeselection(int row, int col) {
-        incrementLocalClock();
-        String message = String.format("DESELECT|%s|%d|%d|%s", playerId, row, col, serializeClock());
-        publishToExchange(currentGameExchange, message);
-    }
-
-    public void publishNumberInsertion(int row, int col, int value) {
-        incrementLocalClock();
-        String message = String.format("INSERT|%s|%d|%d|%d|%s", playerId, row, col, value, serializeClock());
-        publishToExchange(currentGameExchange, message);
-    }
-
-    // --- LOBBY PHASE ---
+    // --- LOBBY ---
 
     public void joinLobby(LobbyListener listener) throws IOException {
-        channel.exchangeDeclare(LOBBY_EXCHANGE, "fanout");
-        currentQueueName = channel.queueDeclare().getQueue();
-        channel.queueBind(currentQueueName, LOBBY_EXCHANGE, "");
+        synchronized (channelLock) {
+            channel.exchangeDeclare(LOBBY_EXCHANGE, "fanout");
+            lobbyQueueName = channel.queueDeclare().getQueue();
+            channel.queueBind(lobbyQueueName, LOBBY_EXCHANGE, "");
 
-        DeliverCallback deliverCallback = (consumerTag, delivery) -> {
-            String message = new String(delivery.getBody(), StandardCharsets.UTF_8);
-            String[] parts = message.split("\\|");
-            String action = parts[0];
+            DeliverCallback deliverCallback = (consumerTag, delivery) -> {
+                String message = new String(delivery.getBody(), StandardCharsets.UTF_8);
+                String[] parts = message.split("\\|");
+                String action = parts[0];
 
-            if ("LIST_GAMES".equals(action)) {
-                String requesterId = parts[1];
-                if (!requesterId.equals(this.playerId)) { // Ignore our own requests
-                    listener.onListGamesRequest(requesterId);
+                if ("LIST_GAMES".equals(action)) {
+                    String requesterId = parts[1];
+                    if (!requesterId.equals(this.playerId)) {
+                        listener.onListGamesRequest(requesterId);
+                    }
+                } else if ("GAME_INFO".equals(action)) {
+                    String gameId = parts[1];
+                    int playersCount = Integer.parseInt(parts[2]);
+                    listener.onGameInfoReceived(gameId, playersCount);
                 }
-            } else if ("GAME_INFO".equals(action)) {
-                String gameId = parts[1];
-                int playersCount = Integer.parseInt(parts[2]);
-                listener.onGameInfoReceived(gameId, playersCount);
-            }
-        };
+            };
 
-        channel.basicConsume(currentQueueName, true, deliverCallback, consumerTag -> { });
+            lobbyConsumerTag = channel.basicConsume(lobbyQueueName, true, deliverCallback, consumerTag -> {});
+        }
         System.out.println(" [" + playerId + "] Joined lobby. Waiting for events...");
     }
 
     public void requestActiveGames() {
-        String message = "LIST_GAMES|" + playerId;
-        publishToExchange(LOBBY_EXCHANGE, message);
+        publishToExchange(LOBBY_EXCHANGE, "LIST_GAMES|" + playerId);
     }
 
     public void publishGameInfo(String gameId, int playersCount) {
-        String message = "GAME_INFO|" + gameId + "|" + playersCount;
-        publishToExchange(LOBBY_EXCHANGE, message);
+        publishToExchange(LOBBY_EXCHANGE, "GAME_INFO|" + gameId + "|" + playersCount);
+    }
+
+    // --- GAME ---
+
+    public void joinGame(String gameId, MessageListener listener) throws IOException {
+        synchronized (channelLock) {
+            // Ensure any previous game subscription is cleaned up
+            if (currentGameExchange != null) {
+                leaveGame();
+            }
+
+            this.currentGameExchange = gameId;
+            channel.exchangeDeclare(currentGameExchange, "fanout");
+            gameQueueName = channel.queueDeclare().getQueue();
+            channel.queueBind(gameQueueName, currentGameExchange, "");
+
+            DeliverCallback deliverCallback = (consumerTag, delivery) -> {
+                String message = new String(delivery.getBody(), StandardCharsets.UTF_8);
+                listener.onMessageReceived(message);
+            };
+
+            gameConsumerTag = channel.basicConsume(gameQueueName, true, deliverCallback, consumerTag -> {});
+        }
+        System.out.println(" [" + playerId + "] Joined game: " + gameId);
+    }
+
+    public void leaveGame() throws IOException {
+        String leftExchange;
+        synchronized (channelLock) {
+            leftExchange = currentGameExchange;
+            if (channel != null && channel.isOpen()) {
+                if (gameConsumerTag != null) {
+                    channel.basicCancel(gameConsumerTag);
+                }
+                if (gameQueueName != null) {
+                    if (currentGameExchange != null) {
+                        channel.queueUnbind(gameQueueName, currentGameExchange, "");
+                    }
+                    channel.queueDelete(gameQueueName);
+                }
+            }
+            gameConsumerTag = null;
+            gameQueueName = null;
+            currentGameExchange = null;
+        }
+        if (leftExchange != null) {
+            System.out.println(" [" + playerId + "] Left the game exchange: " + leftExchange);
+        }
     }
 
     public void publishJoin() {
-        incrementLocalClock();
-        String message = String.format("JOIN|%s|%s", playerId, serializeClock());
-        publishToExchange(currentGameExchange, message);
+        String clock = vectorClock.incrementAndSerialize(playerId);
+        publishToCurrentGame(String.format("JOIN|%s|%s", playerId, clock));
     }
 
     public void publishSyncPlayers(String targetId, String activePlayersStr) {
-        incrementLocalClock();
-        String message = String.format("SYNC_PLAYERS|%s|%s|%s|%s",
-                playerId, targetId, activePlayersStr, serializeClock());
-        publishToExchange(currentGameExchange, message);
+        String clock = vectorClock.incrementAndSerialize(playerId);
+        publishToCurrentGame(String.format("SYNC_PLAYERS|%s|%s|%s|%s", playerId, targetId, activePlayersStr, clock));
+    }
+
+    public void publishCellSelection(int row, int col) {
+        String clock = vectorClock.incrementAndSerialize(playerId);
+        publishToCurrentGame(String.format("SELECT|%s|%d|%d|%s", playerId, row, col, clock));
+    }
+
+    public void publishCellDeselection(int row, int col) {
+        String clock = vectorClock.incrementAndSerialize(playerId);
+        publishToCurrentGame(String.format("DESELECT|%s|%d|%d|%s", playerId, row, col, clock));
+    }
+
+    public void publishNumberInsertion(int row, int col, int value) {
+        String clock = vectorClock.incrementAndSerialize(playerId);
+        publishToCurrentGame(String.format("INSERT|%s|%d|%d|%d|%s", playerId, row, col, value, clock));
     }
 
     public void publishQuit() {
-        incrementLocalClock();
-        String message = String.format("QUIT|%s|%s", playerId, serializeClock());
-        publishToExchange(currentGameExchange, message);
+        String clock = vectorClock.incrementAndSerialize(playerId);
+        publishToCurrentGame(String.format("QUIT|%s|%s", playerId, clock));
     }
 
     public void publishGameOver() {
-        incrementLocalClock();
-        String message = String.format("GAME_OVER|%s|%s", playerId, serializeClock());
-        publishToExchange(currentGameExchange, message);
+        String clock = vectorClock.incrementAndSerialize(playerId);
+        publishToCurrentGame(String.format("GAME_OVER|%s|%s", playerId, clock));
     }
 
     public void publishPing() {
-        String message = String.format("PING|%s", playerId);
-        publishToExchange(currentGameExchange, message);
+        publishToCurrentGame(String.format("PING|%s", playerId));
+    }
+
+    private void publishToCurrentGame(String message) {
+        synchronized (channelLock) {
+            if (currentGameExchange != null) {
+                publishToExchangeInternal(currentGameExchange, message);
+            }
+        }
     }
 
     private void publishToExchange(String exchangeName, String message) {
-        if (channel != null && channel.isOpen()) {
+        synchronized (channelLock) {
+            publishToExchangeInternal(exchangeName, message);
+        }
+    }
+
+    private void publishToExchangeInternal(String exchangeName, String message) {
+        if (channel != null && channel.isOpen() && exchangeName != null) {
             try {
                 channel.basicPublish(exchangeName, "", null, message.getBytes(StandardCharsets.UTF_8));
                 System.out.println(" [x] Sent to " + exchangeName + ": '" + message + "'");
@@ -175,124 +231,43 @@ public class RabbitMQManager {
         }
     }
 
-    // Leave the lobby before joining a specific game
-    public void leaveLobby() throws IOException {
-        if (currentQueueName != null) {
-            channel.queueUnbind(currentQueueName, LOBBY_EXCHANGE, "");
-            System.out.println(" [" + playerId + "] Left the lobby.");
-        }
-    }
+    // --- PERSISTENT RETAINED STATE ---
 
-    private void incrementLocalClock() {
-        int current = vectorClock.getOrDefault(playerId, 0);
-        vectorClock.put(playerId, current + 1);
-    }
-
-    private String serializeClock() {
-        StringBuilder sb = new StringBuilder();
-        for (Map.Entry<String, Integer> entry : vectorClock.entrySet()) {
-            sb.append(entry.getKey()).append(":").append(entry.getValue()).append(",");
-        }
-        return !sb.isEmpty() ? sb.substring(0, sb.length() - 1) : "";
-    }
-
-    public void updateClock(String receivedClockData) {
-        if (receivedClockData == null || receivedClockData.isEmpty()) return;
-
-        String[] entries = receivedClockData.split(",");
-        for (String entry : entries) {
-            String[] parts = entry.split(":");
-            if (parts.length == 2) {
-                String pId = parts[0];
-                int msgClockVal = Integer.parseInt(parts[1]);
-
-                // Update with max()
-                int localClockVal = vectorClock.getOrDefault(pId, 0);
-                vectorClock.put(pId, Math.max(localClockVal, msgClockVal));
-            }
-        }
-    }
-
-    // Saves match last state
     public void retainGameState(String gameId, String serializedState) throws IOException {
         String stateQueue = gameId + "_STATE";
+        Map<String, Object> args = Map.of("x-max-length", 1);
 
-        // Persistent queue with max-length=1 to retain only the last state
-        Map<String, Object> args = new HashMap<>();
-        args.put("x-max-length", 1);
-        channel.queueDeclare(stateQueue, true, false, false, args);
-
-        channel.basicPublish("", stateQueue, null, serializedState.getBytes());
+        synchronized (channelLock) {
+            channel.queueDeclare(stateQueue, true, false, false, args);
+            channel.basicPublish("", stateQueue, MessageProperties.PERSISTENT_TEXT_PLAIN,
+                    serializedState.getBytes(StandardCharsets.UTF_8));
+        }
     }
 
-    // Reads last retained state
     public String getRetainedGameState(String gameId) throws IOException {
         String stateQueue = gameId + "_STATE";
-        Map<String, Object> args = new HashMap<>();
-        args.put("x-max-length", 1);
-        channel.queueDeclare(stateQueue, true, false, false, args);
+        Map<String, Object> args = Map.of("x-max-length", 1);
 
-        // basicGet with autoAck=false reads the message without removing it from the queue
-        GetResponse response = channel.basicGet(stateQueue, false);
-        if (response != null) {
-            String state = new String(response.getBody());
-            // basicReject with requeue=true puts the message back in the queue
-            channel.basicReject(response.getEnvelope().getDeliveryTag(), true);
-            return state;
+        synchronized (channelLock) {
+            channel.queueDeclare(stateQueue, true, false, false, args);
+            GetResponse response = channel.basicGet(stateQueue, false);
+            if (response != null) {
+                String state = new String(response.getBody(), StandardCharsets.UTF_8);
+                channel.basicReject(response.getEnvelope().getDeliveryTag(), true);
+                return state;
+            }
         }
         return "EMPTY";
     }
 
     public void deleteRetainedGameState(String gameId) {
         String stateQueue = gameId + "_STATE";
-        try {
-            channel.queueDelete(stateQueue);
-        } catch (IOException e) {
-            System.err.println("Error during state queue deleting: " + e.getMessage());
-        }
-    }
-
-    // Converts the string to a map representing the vector clock
-    public static Map<String, Integer> parseClock(String clockData) {
-        Map<String, Integer> clock = new HashMap<>();
-        if (clockData == null || clockData.isEmpty()) return clock;
-
-        String[] entries = clockData.split(",");
-        for (String entry : entries) {
-            String[] parts = entry.split(":");
-            if (parts.length == 2) {
-                clock.put(parts[0], Integer.parseInt(parts[1]));
+        synchronized (channelLock) {
+            try {
+                channel.queueDelete(stateQueue);
+            } catch (IOException e) {
+                System.err.println("Error deleting state queue: " + e.getMessage());
             }
         }
-        return clock;
-    }
-
-    // Compares 2 Vector Clocks to determine cause-effect relation
-    public static ClockComparison compareClocks(Map<String, Integer> c1, Map<String, Integer> c2) {
-        boolean lessOrEqual = true;
-        boolean greaterOrEqual = true;
-        boolean equal = true;
-
-        Set<String> keys = new HashSet<>(c1.keySet());
-        keys.addAll(c2.keySet());
-
-        for (String key : keys) {
-            int v1 = c1.getOrDefault(key, 0);
-            int v2 = c2.getOrDefault(key, 0);
-
-            if (v1 < v2) {
-                greaterOrEqual = false;
-                equal = false;
-            } else if (v1 > v2) {
-                lessOrEqual = false;
-                equal = false;
-            }
-        }
-
-        if (equal) return ClockComparison.EQUAL;
-        if (lessOrEqual) return ClockComparison.LESS; // c1 happened before c2
-        if (greaterOrEqual) return ClockComparison.GREATER; // c2 happened before c1
-
-        return ClockComparison.CONCURRENT;
     }
 }

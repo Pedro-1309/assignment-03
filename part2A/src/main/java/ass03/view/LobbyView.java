@@ -2,6 +2,8 @@ package ass03.view;
 
 import javax.swing.*;
 import java.awt.*;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
 
 public class LobbyView extends JFrame {
 
@@ -13,12 +15,13 @@ public class LobbyView extends JFrame {
     public interface LobbyActionListener {
         void onJoinGame(String gameId);
         void onCreateNewGame();
+        void onExit();
     }
 
     public LobbyView() {
         setTitle("Cooperative Sudoku - Lobby");
         setSize(400, 300);
-        setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
         setLayout(new BorderLayout());
 
         gamesModel = new DefaultListModel<>();
@@ -52,6 +55,17 @@ public class LobbyView extends JFrame {
         buttonPanel.add(btnJoin);
         buttonPanel.add(btnCreate);
         add(buttonPanel, BorderLayout.SOUTH);
+
+        addWindowListener(new WindowAdapter() {
+            @Override
+            public void windowClosing(WindowEvent e) {
+                if (listener != null) {
+                    listener.onExit();
+                } else {
+                    System.exit(0);
+                }
+            }
+        });
     }
 
     public void setListener(LobbyActionListener listener) {
@@ -62,11 +76,12 @@ public class LobbyView extends JFrame {
     public void addAvailableGame(String gameId, int playersCount) {
         SwingUtilities.invokeLater(() -> {
             String displayString = gameId + " (" + playersCount + " players)";
+            String prefix = gameId + " ";
 
             // Check if the game already exists
             for (int i = 0; i < gamesModel.size(); i++) {
                 String item = gamesModel.getElementAt(i);
-                if (item.startsWith(gameId)) {
+                if (item.startsWith(prefix)) {
                     if (!item.equals(displayString)) {
                         // Same id, different number of players: update the view
                         gamesModel.set(i, displayString);
@@ -81,9 +96,10 @@ public class LobbyView extends JFrame {
 
     public void removeAvailableGame(String gameId) {
         SwingUtilities.invokeLater(() -> {
+            String prefix = gameId + " ";
             for (int i = 0; i < gamesModel.size(); i++) {
                 String item = gamesModel.getElementAt(i);
-                if (item.startsWith(gameId)) {
+                if (item.startsWith(prefix)) {
                     gamesModel.remove(i);
                     break;
                 }
@@ -91,14 +107,17 @@ public class LobbyView extends JFrame {
         });
     }
 
+    public void showInfoDialog(String message, String title) {
+        SwingUtilities.invokeLater(() ->
+                JOptionPane.showMessageDialog(this, message, title, JOptionPane.INFORMATION_MESSAGE)
+        );
+    }
+
     public void display() {
         SwingUtilities.invokeLater(() -> setVisible(true));
     }
 
     public void hideView() {
-        SwingUtilities.invokeLater(() -> {
-            setVisible(false);
-            dispose();
-        });
+        SwingUtilities.invokeLater(() -> setVisible(false));
     }
 }

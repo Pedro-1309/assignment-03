@@ -4,6 +4,8 @@ import javax.swing.*;
 import java.awt.*;
 import java.awt.event.KeyAdapter;
 import java.awt.event.KeyEvent;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Random;
@@ -11,16 +13,17 @@ import java.util.Random;
 public class SudokuView extends JFrame {
 
     private static final int GRID_SIZE = 9;
+
     private final JButton[][] cells = new JButton[GRID_SIZE][GRID_SIZE];
-    private SudokuActionListener listener;
     private final String localPlayerId;
-
     private final DefaultListModel<String> playersListModel;
-    private final JList<String> playersList;
     private final JTextArea logArea;
-    private final JButton leaveBtn;
-
     private final Map<String, Color> playerColors = new HashMap<>();
+    private final Random random = new Random();
+    private int lastClickedRow = -1;
+    private int lastClickedCol = -1;
+
+    private SudokuActionListener listener;
 
     public interface SudokuActionListener {
         void onCellSelected(int row, int col);
@@ -47,7 +50,7 @@ public class SudokuView extends JFrame {
         sidePanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
 
         playersListModel = new DefaultListModel<>();
-        playersList = new JList<>(playersListModel);
+        JList<String> playersList = new JList<>(playersListModel);
         playersList.setCellRenderer(new DefaultListCellRenderer() {
             @Override
             public Component getListCellRendererComponent(JList<?> list, Object value, int index, boolean isSelected, boolean cellHasFocus) {
@@ -77,17 +80,11 @@ public class SudokuView extends JFrame {
         JScrollPane logScroll = new JScrollPane(logArea);
         logScroll.setBorder(BorderFactory.createTitledBorder("Match Events"));
 
-        leaveBtn = new JButton("Leave Match");
+        JButton leaveBtn = new JButton("Leave Match");
         leaveBtn.setBackground(new Color(255, 100, 100));
         leaveBtn.setForeground(Color.WHITE);
         leaveBtn.setFocusPainted(false);
-
-        leaveBtn.addActionListener(e -> {
-            if (listener != null) {
-                listener.onQuit();
-            }
-            dispose();
-        });
+        leaveBtn.addActionListener(e -> handleQuit());
 
         JPanel topSidePanel = new JPanel(new BorderLayout());
         topSidePanel.add(playersScroll, BorderLayout.CENTER);
@@ -96,18 +93,22 @@ public class SudokuView extends JFrame {
         sidePanel.add(leaveBtn, BorderLayout.SOUTH);
 
         add(sidePanel, BorderLayout.EAST);
+        setupKeyBindings();
 
         // Closing the window -> leaving the game and notify the controller
-        addWindowListener(new java.awt.event.WindowAdapter() {
+        addWindowListener(new WindowAdapter() {
             @Override
-            public void windowClosing(java.awt.event.WindowEvent windowEvent) {
-                if (listener != null) {
-                    listener.onQuit();
-                }
-                dispose();
+            public void windowClosing(WindowEvent windowEvent) {
+                handleQuit();
             }
         });
+    }
 
+    private void handleQuit() {
+        if (listener != null) {
+            listener.onQuit();
+        }
+        dispose();
     }
 
     public void setListener(SudokuActionListener listener) {
@@ -132,30 +133,11 @@ public class SudokuView extends JFrame {
                 final int r = row;
                 final int c = col;
 
-                // Cell selection
                 btn.addActionListener(e -> {
+                    lastClickedRow = r;
+                    lastClickedCol = c;
                     if (listener != null) {
                         listener.onCellSelected(r, c);
-                    }
-                });
-
-                // Number insertion
-                btn.addKeyListener(new KeyAdapter() {
-                    @Override
-                    public void keyTyped(KeyEvent e) {
-                        char keyChar = e.getKeyChar();
-                        if (listener != null) {
-                            if (Character.isDigit(keyChar)) {
-                                int value = Character.getNumericValue(keyChar);
-                                if (listener != null) {
-                                    listener.onNumberInserted(r, c, value);
-                                }
-                            } else if (keyChar == '\b' || keyChar == 127) { // Backspace or Canc
-                                if (listener != null) {
-                                    listener.onNumberInserted(r, c, 0); // 0 means cancel
-                                }
-                            }
-                        }
                     }
                 });
 
@@ -206,6 +188,91 @@ public class SudokuView extends JFrame {
         });
     }
 
+    private void setupKeyBindings() {
+        InputMap inputMap = getRootPane().getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW);
+        ActionMap actionMap = getRootPane().getActionMap();
+
+        // Digits 1-9
+        for (int num = 1; num <= 9; num++) {
+            final int value = num;
+            String actionKey = "insert_" + num;
+
+            inputMap.put(KeyStroke.getKeyStroke(KeyEvent.VK_0 + num, 0), actionKey);
+            inputMap.put(KeyStroke.getKeyStroke(KeyEvent.VK_NUMPAD0 + num, 0), actionKey);
+
+            actionMap.put(actionKey, new AbstractAction() {
+                @Override
+                public void actionPerformed(java.awt.event.ActionEvent e) {
+                    triggerNumberInsertion(value);
+                }
+            });
+        }
+
+        // Clear cell (0, Backspace, Delete)
+        String clearKey = "clear_cell";
+        inputMap.put(KeyStroke.getKeyStroke(KeyEvent.VK_0, 0), clearKey);
+        inputMap.put(KeyStroke.getKeyStroke(KeyEvent.VK_NUMPAD0, 0), clearKey);
+        inputMap.put(KeyStroke.getKeyStroke(KeyEvent.VK_BACK_SPACE, 0), clearKey);
+        inputMap.put(KeyStroke.getKeyStroke(KeyEvent.VK_DELETE, 0), clearKey);
+
+        actionMap.put(clearKey, new AbstractAction() {
+            @Override
+            public void actionPerformed(java.awt.event.ActionEvent e) {
+                triggerNumberInsertion(0);
+            }
+        });
+    }
+
+    private void triggerNumberInsertion(int value) {
+        if (listener != null && lastClickedRow != -1 && lastClickedCol != -1) {
+            listener.onNumberInserted(lastClickedRow, lastClickedCol, value);
+        }
+    }
+
+    public void updateActivePlayers(java.util.List<String> players) {
+        SwingUtilities.invokeLater(() -> {
+            playersListModel.clear();
+            for (String p : players) {
+                if (p.equals(localPlayerId)) {
+                    playersListModel.addElement(p + " (You)");
+                } else {
+                    playersListModel.addElement(p);
+                }
+            }
+        });
+    }
+
+    public void showInvalidMoveDialog() {
+        SwingUtilities.invokeLater(() ->
+                JOptionPane.showMessageDialog(
+                        this,
+                        "Invalid move. Same number already exists in the row, column or 3x3 grid.",
+                        "Invalid Move",
+                        JOptionPane.WARNING_MESSAGE
+                )
+        );
+    }
+
+    public void showGameCompleteDialog() {
+        SwingUtilities.invokeLater(() -> {
+            JOptionPane.showMessageDialog(this,
+                    "Congratulations! The board is complete.",
+                    "Game Over",
+                    JOptionPane.INFORMATION_MESSAGE);
+            if (listener != null) {
+                listener.onQuit();
+            }
+            dispose();
+        });
+    }
+
+    public void appendLog(String message) {
+        SwingUtilities.invokeLater(() -> {
+            logArea.append(message + "\n");
+            logArea.setCaretPosition(logArea.getDocument().getLength()); // Scroll to the bottom
+        });
+    }
+
     public void display() {
         SwingUtilities.invokeLater(() -> setVisible(true));
     }
@@ -251,38 +318,5 @@ public class SudokuView extends JFrame {
         int gDiff = c1.getGreen() - c2.getGreen();
         int bDiff = c1.getBlue() - c2.getBlue();
         return Math.sqrt(rDiff * rDiff + gDiff * gDiff + bDiff * bDiff);
-    }
-
-    public void updateActivePlayers(java.util.List<String> players) {
-        SwingUtilities.invokeLater(() -> {
-            playersListModel.clear();
-            for (String p : players) {
-                if (p.equals(localPlayerId)) {
-                    playersListModel.addElement(p + " (You)");
-                } else {
-                    playersListModel.addElement(p);
-                }
-            }
-        });
-    }
-
-    public void showGameCompleteDialog() {
-        SwingUtilities.invokeLater(() -> {
-            JOptionPane.showMessageDialog(this,
-                    "Congratulations! The board is complete.",
-                    "Game Over",
-                    JOptionPane.INFORMATION_MESSAGE);
-            if (listener != null) {
-                listener.onQuit();
-            }
-            dispose();
-        });
-    }
-
-    public void appendLog(String message) {
-        SwingUtilities.invokeLater(() -> {
-            logArea.append(message + "\n");
-            logArea.setCaretPosition(logArea.getDocument().getLength()); // Scroll to the bottom
-        });
     }
 }

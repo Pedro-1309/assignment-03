@@ -1,38 +1,38 @@
 package ass03.model;
 
-import ass03.network.RabbitMQManager;
-
-import java.util.HashMap;
-import java.util.Map;
-
 public class SudokuBoard {
     private static final int GRID_SIZE = 9;
+
     private final int[][] grid = new int[GRID_SIZE][GRID_SIZE];
     private final String[][] selectedBy = new String[GRID_SIZE][GRID_SIZE];
     private final boolean[][] fixedCells = new boolean[GRID_SIZE][GRID_SIZE];
     private final String[][] insertedBy = new String[GRID_SIZE][GRID_SIZE];
-    private final Map<String, Integer>[][] cellClocks = new Map[GRID_SIZE][GRID_SIZE];
-    private final Map<String, Integer>[][] selectionClocks = new Map[GRID_SIZE][GRID_SIZE];
+    private final VectorClock[][] cellClocks = new VectorClock[GRID_SIZE][GRID_SIZE];
+    private final VectorClock[][] selectionClocks = new VectorClock[GRID_SIZE][GRID_SIZE];
 
     public synchronized int getValue(int row, int col) {
         return grid[row][col];
     }
 
-    public synchronized boolean setSelection(int row, int col, String playerId, Map<String, Integer> msgClock) {
-        Map<String, Integer> currentClock = selectionClocks[row][col];
-        if (currentClock == null) currentClock = new HashMap<>();
+    public synchronized String getSelectedBy(int row, int col) {
+        return selectedBy[row][col];
+    }
 
-        RabbitMQManager.ClockComparison cmp = RabbitMQManager.compareClocks(msgClock, currentClock);
+    public synchronized String getInsertedBy(int row, int col) {
+        return insertedBy[row][col];
+    }
 
-        if (cmp == RabbitMQManager.ClockComparison.LESS) {
+    public synchronized boolean setSelection(int row, int col, String playerId, VectorClock msgClock) {
+        VectorClock currentClock = selectionClocks[row][col];
+        VectorClock.Comparison cmp = VectorClock.compare(msgClock, currentClock);
+
+        if (cmp == VectorClock.Comparison.LESS) {
             return false; // Outdated message
-        } else if (cmp == RabbitMQManager.ClockComparison.CONCURRENT) {
+        } else if (cmp == VectorClock.Comparison.CONCURRENT) {
             String currentSelector = selectedBy[row][col];
-            // Conflict resolution: the player with the "smaller" ID wins
-            if (currentSelector != null) {
-                if (playerId.compareTo(currentSelector) > 0) {
-                    return false;
-                }
+            // Deterministic tie-breaker: smaller player ID wins
+            if (currentSelector != null && playerId.compareTo(currentSelector) > 0) {
+                return false;
             }
         }
 
@@ -55,11 +55,7 @@ public class SudokuBoard {
         }
     }
 
-    public synchronized String getSelectedBy(int row, int col) {
-        return selectedBy[row][col];
-    }
-
-    public void loadInitialBoard() {
+    public synchronized void loadInitialBoard() {
         int[][] board = SudokuGridGenerator.getRandomBoard();
         for (int r = 0; r < GRID_SIZE; r++) {
             for (int c = 0; c < GRID_SIZE; c++) {
@@ -72,24 +68,29 @@ public class SudokuBoard {
                     fixedCells[r][c] = false;
                     insertedBy[r][c] = null;
                 }
+                selectedBy[r][c] = null;
+                cellClocks[r][c] = null;
+                selectionClocks[r][c] = null;
             }
         }
     }
 
-    public void clearBoard() {
+    public synchronized void clearBoard() {
         for (int r = 0; r < GRID_SIZE; r++) {
             for (int c = 0; c < GRID_SIZE; c++) {
                 grid[r][c] = 0;
                 fixedCells[r][c] = false;
                 insertedBy[r][c] = null;
                 selectedBy[r][c] = null;
+                cellClocks[r][c] = null;
+                selectionClocks[r][c] = null;
             }
         }
     }
 
-    public boolean isValidMove(int row, int col, int value) {
+    public synchronized boolean isValidMove(int row, int col, int value) {
         if (fixedCells[row][col]) return false;
-        if (value == 0) return true; // Needed for canceling a number
+        if (value == 0) return true; // 0 clears the cell
         if (value < 1 || value > 9) return false;
 
         for (int i = 0; i < GRID_SIZE; i++) {
@@ -113,7 +114,7 @@ public class SudokuBoard {
         return currentSelector == null || currentSelector.equals(localPlayerId);
     }
 
-    public boolean isComplete() {
+    public synchronized boolean isComplete() {
         for (int r = 0; r < GRID_SIZE; r++) {
             for (int c = 0; c < GRID_SIZE; c++) {
                 if (grid[r][c] == 0) {
@@ -124,40 +125,24 @@ public class SudokuBoard {
         return true;
     }
 
-    public synchronized boolean setValue(int row, int col, int value, String playerId, Map<String, Integer> msgClock) {
-        Map<String, Integer> currentCellClock = cellClocks[row][col];
-        if (currentCellClock == null) currentCellClock = new HashMap<>();
+    public synchronized boolean setValue(int row, int col, int value, String playerId, VectorClock msgClock) {
+        VectorClock currentCellClock = cellClocks[row][col];
+        VectorClock.Comparison cmp = VectorClock.compare(msgClock, currentCellClock);
 
-        RabbitMQManager.ClockComparison cmp = RabbitMQManager.compareClocks(msgClock, currentCellClock);
-        if (cmp == RabbitMQManager.ClockComparison.LESS) {
-            // Message is outdated, ignore it
-            return false;
-        }
-        else if (cmp == RabbitMQManager.ClockComparison.CONCURRENT) {
-            // Conflict detected
+        if (cmp == VectorClock.Comparison.LESS) {
+            return false; // Outdated message
+        } else if (cmp == VectorClock.Comparison.CONCURRENT) {
             String currentAuthor = insertedBy[row][col];
-
-            // Tie-breaker
-            if (currentAuthor != null && !currentAuthor.equals("SYSTEM")) {
-                // ID comparison: the one with the "smaller" ID wins
-                if (playerId.compareTo(currentAuthor) > 0) {
-                    return false;
-                }
+            // Deterministic tie-breaker: smaller player ID wins
+            if (currentAuthor != null && !currentAuthor.equals("SYSTEM") && playerId.compareTo(currentAuthor) > 0) {
+                return false;
             }
         }
 
         grid[row][col] = value;
         cellClocks[row][col] = msgClock;
-        if (value == 0) {
-            insertedBy[row][col] = null;
-        } else {
-            insertedBy[row][col] = playerId;
-        }
+        insertedBy[row][col] = (value == 0) ? null : playerId;
         return true;
-    }
-
-    public String getInsertedBy(int row, int col) {
-        return insertedBy[row][col];
     }
 
     public synchronized String serializeState() {
@@ -195,12 +180,8 @@ public class SudokuBoard {
 
             grid[r][c] = val;
             fixedCells[r][c] = isFixed;
-            if (!"NONE".equals(sel)) {
-                selectedBy[r][c] = sel;
-            }
-            if (!"NONE".equals(inserter)) {
-                insertedBy[r][c] = inserter;
-            }
+            selectedBy[r][c] = "NONE".equals(sel) ? null : sel;
+            insertedBy[r][c] = "NONE".equals(inserter) ? null : inserter;
         }
     }
 }
