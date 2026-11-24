@@ -1,4 +1,4 @@
-package ass03;
+package ass03.model;
 
 import java.util.ArrayList;
 import java.util.List;

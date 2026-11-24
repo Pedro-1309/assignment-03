@@ -1,5 +1,10 @@
 package ass03;
 
+import ass03.model.SudokuBoard;
+import ass03.network.RabbitMQManager;
+import ass03.view.LobbyView;
+import ass03.view.SudokuView;
+
 import javax.swing.*;
 import java.io.IOException;
 import java.util.List;

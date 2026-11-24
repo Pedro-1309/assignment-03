@@ -1,4 +1,4 @@
-package ass03;
+package ass03.view;
 
 import javax.swing.*;
 import java.awt.*;

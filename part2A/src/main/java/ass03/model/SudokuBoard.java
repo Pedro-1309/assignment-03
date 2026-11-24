@@ -1,4 +1,6 @@
-package ass03;
+package ass03.model;
+
+import ass03.network.RabbitMQManager;
 
 import java.util.HashMap;
 import java.util.Map;

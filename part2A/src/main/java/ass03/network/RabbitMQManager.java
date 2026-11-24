@@ -1,4 +1,4 @@
-package ass03;
+package ass03.network;
 
 import com.rabbitmq.client.*;
 
