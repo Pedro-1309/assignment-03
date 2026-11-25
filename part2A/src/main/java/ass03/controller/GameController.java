@@ -8,11 +8,14 @@ import ass03.view.SudokuView;
 
 import java.io.IOException;
 import java.util.List;
-import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.Map;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class GameController {
+
+    private static final long LOBBY_STALE_TIMEOUT_MS = 6_000;
 
     private final String localPlayerId;
     private final LobbyView lobbyView;
@@ -24,6 +27,10 @@ public class GameController {
     private final AtomicInteger localSelectedRow = new AtomicInteger(-1);
     private final AtomicInteger localSelectedCol = new AtomicInteger(-1);
     private final AtomicBoolean isShuttingDown = new AtomicBoolean(false);
+
+    private final Map<String, Long> lobbyGameLastSeen = new ConcurrentHashMap<>();
+    private final Map<String, Integer> lobbyGameCounts = new ConcurrentHashMap<>();
+    private final ScheduledExecutorService lobbyMonitorExecutor = Executors.newSingleThreadScheduledExecutor();
 
     private volatile String currentGameId = null;
     private volatile boolean isGameOver = false;
@@ -47,6 +54,13 @@ public class GameController {
             setupLobbyNetworking();
             setupLobbyViewListeners();
 
+            // Load unfinished games
+            for (String gameId : networkManager.getRetainedLobbyGames()) {
+                if (lobbyGameCounts.putIfAbsent(gameId, 0) == null) {
+                    lobbyView.addAvailableGame(gameId, 0);
+                }
+            }
+
             networkManager.requestActiveGames();
             lobbyView.display();
         } catch (Exception e) {
@@ -69,12 +83,36 @@ public class GameController {
             @Override
             public void onGameInfoReceived(String gameId, int playersCount) {
                 if (playersCount <= -1) {
+                    lobbyGameLastSeen.remove(gameId);
+                    lobbyGameCounts.remove(gameId);
                     lobbyView.removeAvailableGame(gameId);
                 } else {
+                    lobbyGameCounts.put(gameId, playersCount);
+                    if (playersCount > 0) {
+                        lobbyGameLastSeen.put(gameId, System.currentTimeMillis());
+                    } else {
+                        lobbyGameLastSeen.remove(gameId);
+                    }
                     lobbyView.addAvailableGame(gameId, playersCount);
                 }
             }
         });
+
+        // Detect matches where all players crashed
+        lobbyMonitorExecutor.scheduleAtFixedRate(() -> {
+            long now = System.currentTimeMillis();
+            for (Map.Entry<String, Long> entry : lobbyGameLastSeen.entrySet()) {
+                String gameId = entry.getKey();
+                if (now - entry.getValue() > LOBBY_STALE_TIMEOUT_MS) {
+                    lobbyGameLastSeen.remove(gameId);
+                    Integer count = lobbyGameCounts.get(gameId);
+                    if (count != null && count > 0) {
+                        lobbyGameCounts.put(gameId, 0);
+                        lobbyView.addAvailableGame(gameId, 0);
+                    }
+                }
+            }
+        }, 3, 3, TimeUnit.SECONDS);
     }
 
     private void setupLobbyViewListeners() {
@@ -94,6 +132,7 @@ public class GameController {
                 try {
                     // Save the initial state
                     networkManager.retainGameState(newGameId, board.serializeState());
+                    networkManager.addRetainedLobbyGame(newGameId);
                 } catch (IOException ex) {
                     ex.printStackTrace();
                 }
@@ -130,6 +169,11 @@ public class GameController {
 
                 if (board.isComplete()) {
                     lobbyView.showInfoDialog("This game is already completed.", "Game Over");
+                    try {
+                        networkManager.removeRetainedLobbyGame(gameId);
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    }
                     networkManager.publishGameInfo(gameId, -1);
                     currentGameId = null;
                     lobbyView.display();
@@ -157,6 +201,10 @@ public class GameController {
                     () -> {
                         if (!isGameOver && currentGameId != null) {
                             networkManager.publishPing();
+                            // Leader refreshes lobby count so detects crashes
+                            if (amITheLeader()) {
+                                networkManager.publishGameInfo(gameId, activePlayersList.size());
+                            }
                         }
                     },
                     crashedPlayer -> handlePlayerCrashed(crashedPlayer, gameId, view)
@@ -388,6 +436,11 @@ public class GameController {
                 if (senderId.equals(localPlayerId)) {
                     networkManager.publishGameOver();
                     networkManager.deleteRetainedGameState(gameId);
+                    try {
+                        networkManager.removeRetainedLobbyGame(gameId);
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    }
                     networkManager.publishGameInfo(gameId, -1);
                 }
             }
@@ -452,7 +505,20 @@ public class GameController {
 
     private void shutdownCleanly() {
         if (isShuttingDown.compareAndSet(false, true)) {
+            String gameId = currentGameId;
+            if (gameId != null && !isGameOver) {
+                int currentRow = localSelectedRow.getAndSet(-1);
+                int currentCol = localSelectedCol.getAndSet(-1);
+                if (currentRow != -1 && currentCol != -1) {
+                    networkManager.publishCellDeselection(currentRow, currentCol);
+                }
+                networkManager.publishQuit();
+                if (activePlayersList.size() == 1 && activePlayersList.contains(localPlayerId)) {
+                    networkManager.publishGameInfo(gameId, 0);
+                }
+            }
             heartbeatManager.stop();
+            lobbyMonitorExecutor.shutdownNow();
             networkManager.disconnect();
         }
     }

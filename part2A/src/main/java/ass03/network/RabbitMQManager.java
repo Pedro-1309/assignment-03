@@ -5,12 +5,15 @@ import com.rabbitmq.client.*;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeoutException;
 
 public class RabbitMQManager {
 
     private static final String LOBBY_EXCHANGE = "sudoku_lobby";
+    private static final String LOBBY_GAMES_QUEUE = "sudoku_lobby_games";
 
     private final String playerId;
     private final VectorClock vectorClock;
@@ -269,5 +272,55 @@ public class RabbitMQManager {
                 System.err.println("Error deleting state queue: " + e.getMessage());
             }
         }
+    }
+
+    // --- PERSISTENT LOBBY STATE (for 0-player games) ---
+
+    public Set<String> getRetainedLobbyGames() throws IOException {
+        Set<String> games = new LinkedHashSet<>();
+        Map<String, Object> args = Map.of("x-max-length", 1);
+
+        synchronized (channelLock) {
+            channel.queueDeclare(LOBBY_GAMES_QUEUE, true, false, false, args);
+            GetResponse response = channel.basicGet(LOBBY_GAMES_QUEUE, false);
+            if (response != null) {
+                String payload = new String(response.getBody(), StandardCharsets.UTF_8);
+                channel.basicReject(response.getEnvelope().getDeliveryTag(), true);
+                if (!payload.isEmpty() && !"EMPTY".equals(payload)) {
+                    for (String id : payload.split(",")) {
+                        if (!id.isEmpty()) {
+                            games.add(id);
+                        }
+                    }
+                }
+            }
+        }
+        return games;
+    }
+
+    public void addRetainedLobbyGame(String gameId) throws IOException {
+        synchronized (channelLock) {
+            Set<String> games = getRetainedLobbyGames();
+            if (games.add(gameId)) {
+                saveRetainedLobbyGames(games);
+            }
+        }
+    }
+
+    public void removeRetainedLobbyGame(String gameId) throws IOException {
+        synchronized (channelLock) {
+            Set<String> games = getRetainedLobbyGames();
+            if (games.remove(gameId)) {
+                saveRetainedLobbyGames(games);
+            }
+        }
+    }
+
+    private void saveRetainedLobbyGames(Set<String> games) throws IOException {
+        Map<String, Object> args = Map.of("x-max-length", 1);
+        String payload = games.isEmpty() ? "EMPTY" : String.join(",", games);
+        channel.queueDeclare(LOBBY_GAMES_QUEUE, true, false, false, args);
+        channel.basicPublish("", LOBBY_GAMES_QUEUE, MessageProperties.PERSISTENT_TEXT_PLAIN,
+                payload.getBytes(StandardCharsets.UTF_8));
     }
 }
